@@ -30,7 +30,6 @@ def test_generate_meta_normal_func():
 def test_generate_meta_pydantic():
     from pydantic import BaseModel
 
-    # 直接用真实的 pydantic BaseModel
     class FooModel(BaseModel):
         x: int
         y: int | None = None
@@ -45,7 +44,6 @@ def test_generate_meta_pydantic():
     assert "x" in meta["parameters"]["properties"]
     assert "x" in meta["parameters"]["required"]
     assert "y" in meta["parameters"]["properties"]
-
     assert "y" not in meta["parameters"]["required"]
 
 
@@ -65,6 +63,31 @@ def test_generate_meta_dataclass():
     assert "x" in meta["parameters"]["required"]
     assert "y" in meta["parameters"]["properties"]
     assert "y" not in meta["parameters"]["required"]
+
+
+def test_generate_meta_param_type_builtin_types():
+    def foo(*, a: int, b: float, c: str, d: bool) -> None:
+        pass
+
+    meta = generate_meta(foo)
+    props = meta["parameters"]["properties"]
+    assert props["a"]["type"] == "number"
+    assert props["b"]["type"] == "number"
+    assert props["c"]["type"] == "string"
+    assert props["d"]["type"] == "boolean"
+    assert set(meta["parameters"]["required"]) == {"a", "b", "c", "d"}
+
+
+def test_generate_meta_param_type_list_and_dict():
+    def foo(a: list[int], b: list[str], c: dict, d: dict[str, int]) -> None:
+        pass
+
+    meta = generate_meta(foo)
+    props = meta["parameters"]["properties"]
+    assert props["a"]["type"] == "array"
+    assert props["b"]["type"] == "array"
+    assert props["c"]["type"] == "object"
+    assert props["d"]["type"] == "object"
 
 
 def test_get_tools():
@@ -90,6 +113,11 @@ def test_handle_function_call_normal():
     with patch("funcall.__init__.ResponseFunctionToolCall", DummyResponseFunctionToolCall):
         result = fc.handle_function_call(item)
     assert result == 3
+
+
+def test_no_function_call():
+    fc = Funcall()
+    assert fc.get_tools() == []
 
 
 def test_handle_function_call_basemodel():
