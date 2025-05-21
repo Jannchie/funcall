@@ -6,8 +6,8 @@ from logging import getLogger
 from typing import get_type_hints
 
 from openai.types.responses import (
+    FunctionToolParam,
     ResponseFunctionToolCall,
-    ToolParam,
 )
 
 # 新增导入
@@ -43,7 +43,7 @@ def param_type(py_type: str | type | FieldInfo | None) -> str:
     return "string"
 
 
-def generate_meta(func: Callable) -> ToolParam:
+def generate_meta(func: Callable) -> FunctionToolParam:
     sig = inspect.signature(func)
     type_hints = get_type_hints(func)
     params = {}
@@ -60,7 +60,7 @@ def generate_meta(func: Callable) -> ToolParam:
                     "type": param_type(field),
                     "description": desc or f"{name}.{field_name}",
                 }
-                if field.is_required:
+                if field.is_required():
                     required.append(field_name)
 
         elif dataclasses.is_dataclass(hint):
@@ -79,7 +79,7 @@ def generate_meta(func: Callable) -> ToolParam:
             params[name] = {"type": param_type(hint), "description": param_desc}
             required.append(name)
 
-    meta: ToolParam = {
+    meta: FunctionToolParam = {
         "type": "function",
         "name": func.__name__,
         "description": doc,
@@ -101,7 +101,7 @@ class Funcall:
         self.functions = functions
         self.function_map = {func.__name__: func for func in functions}
 
-    def get_tools(self) -> list[ToolParam]:
+    def get_tools(self) -> list[FunctionToolParam]:
         return [generate_meta(func) for func in self.functions]
 
     def handle_function_call(self, item: ResponseFunctionToolCall):
