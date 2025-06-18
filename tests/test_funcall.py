@@ -153,3 +153,26 @@ def test_handle_function_call_invalid_json():
     item = DummyResponseFunctionToolCall("add", "not a json")
     with pytest.raises(json.JSONDecodeError):
         fc.handle_function_call(item)
+
+
+def test_generate_meta_param_type_dataclass():
+    @dataclasses.dataclass
+    class MyData:
+        a: int
+        b: str = "default"
+
+    def foo(data: MyData) -> str:
+        return f"{data.a}-{data.b}"
+
+    meta = generate_meta(foo)
+    fc = Funcall([foo])
+    item = DummyResponseFunctionToolCall("foo", json.dumps({"a": 1, "b": "test"}))
+    with patch("funcall.__init__.ResponseFunctionToolCall", DummyResponseFunctionToolCall):
+        fc.handle_function_call(item)
+    props = meta["parameters"]["properties"]
+    assert "a" in props
+    assert "b" in props
+    assert props["a"]["type"] == "number"
+    assert props["b"]["type"] == "string"
+    assert "a" in meta["parameters"]["required"]
+    assert "b" not in meta["parameters"]["required"]

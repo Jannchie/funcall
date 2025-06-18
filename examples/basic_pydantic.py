@@ -1,18 +1,24 @@
 import openai
 from openai.types.responses import ResponseFunctionToolCall
+from pydantic import BaseModel, Field
 
 from funcall import Funcall
 
 
+# Use Pydantic to define the schema
+class AddForm(BaseModel):
+    c: float = Field(description="The first number")
+
+
 # Define the function to be called
-def add(a: float, b: float) -> float:
+def add(form: AddForm, b: float) -> float:
     """Calculate the sum of two numbers"""
-    return a + b
+    return form.c + b
 
 
 # Use Funcall to manage function
 fc = Funcall([add])
-
+print(fc.get_tools())
 resp = openai.responses.create(
     model="gpt-4.1",
     input="Use function call to calculate the sum of 114 and 514",

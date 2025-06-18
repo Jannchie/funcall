@@ -1,13 +1,22 @@
+from dataclasses import dataclass, field
+
 import openai
 from openai.types.responses import ResponseFunctionToolCall
 
 from funcall import Funcall
 
 
+# Use dataclasses to define the schema
+@dataclass
+class AddForm:
+    a: float = field(metadata={"description": "The first number"})
+    b: float = field(metadata={"description": "The second number"})
+
+
 # Define the function to be called
-def add(a: float, b: float) -> float:
+def add(data: AddForm) -> float:
     """Calculate the sum of two numbers"""
-    return a + b
+    return data.a + data.b
 
 
 # Use Funcall to manage function

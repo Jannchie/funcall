@@ -9,8 +9,6 @@ from openai.types.responses import (
     FunctionToolParam,
     ResponseFunctionToolCall,
 )
-
-# 新增导入
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
@@ -34,10 +32,6 @@ def param_type(py_type: str | type | FieldInfo | None) -> str:
             return origin_map[origin]
     if py_type in type_map:
         return type_map[py_type]
-    if BaseModel and isinstance(py_type, type) and issubclass(py_type, BaseModel):
-        return "object"
-    if dataclasses.is_dataclass(py_type):
-        return "object"
     if isinstance(py_type, FieldInfo):
         return param_type(py_type.annotation)
     return "string"
@@ -74,11 +68,8 @@ def generate_meta(func: Callable) -> FunctionToolParam:
                 if field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING:
                     required.append(field.name)
         else:
-            # Normal parameter
-            param_desc = f"The {list(sig.parameters.keys()).index(name) + 1}th parameter"
-            params[name] = {"type": param_type(hint), "description": param_desc}
+            params[name] = {"type": param_type(hint)}
             required.append(name)
-
     meta: FunctionToolParam = {
         "type": "function",
         "name": func.__name__,
@@ -108,17 +99,26 @@ class Funcall:
         if item.name in self.function_map:
             func = self.function_map[item.name]
             args = item.arguments
-            if BaseModel and issubclass(
-                func.__annotations__.get("data", None),
-                BaseModel,
-            ):
-                model = func.__annotations__["data"]
-                data = model.model_validate_json(args)
-                result = func(data)
-            else:
-                kwargs = json.loads(args)
-                result = func(**kwargs)
-
-            return result
+            sig = inspect.signature(func)
+            type_hints = get_type_hints(func)
+            kwargs = json.loads(args)
+            new_kwargs = {}
+            for name in sig.parameters:
+                hint = type_hints.get(name, str)
+                if isinstance(hint, type) and BaseModel and issubclass(hint, BaseModel):
+                    # 用 kwargs 构造 Pydantic 对象
+                    model = hint
+                    model_fields = {k: v for k, v in kwargs.items() if k in model.model_fields}
+                    new_kwargs[name] = model(**model_fields)
+                elif dataclasses.is_dataclass(hint):
+                    # 用 kwargs 构造 dataclass 对象
+                    model_fields = {k: v for k, v in kwargs.items() if k in [f.name for f in dataclasses.fields(hint)]}
+                    new_kwargs[name] = hint(**model_fields)
+                elif name in kwargs:
+                    new_kwargs[name] = kwargs[name]
+            return func(**new_kwargs)
         msg = f"Function {item.name} not found"
         raise ValueError(msg)
+
+
+__all__ = ["Funcall", "generate_meta", "param_type"]

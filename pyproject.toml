@@ -5,7 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Jianqi Pan", email = "jannchie@gmail.com" }]
 requires-python = ">=3.10"
-dependencies = ["openai>=1.79.0", "pydantic>=2.11.4", "rich>=14.0.0"]
+dependencies = [
+    "litellm>=1.72.6.post1",
+    "openai>=1.79.0",
+    "pydantic>=2.11.4",
+    "rich>=14.0.0",
+]
 keywords = ["function call", "openai", "pydantic", "rich", "AI", "tooling"]
 license = { text = "MIT" }
 classifiers = [
@@ -38,12 +43,12 @@ ignore = [
     "TD002",
     "TD003",
     "D",
-    "PLR2004", # Allow Magic Numbers
-    "INP001",  # Allow without __init__.py
-    "N812",    # Allow aliased to non-lowercase names (e.g. `import torch.nn.functional as F`)
-    "FBT003",  # Allow boolean positional values in function calls
-    "S311",    # Allow use random
-    "ANN201",  # Allow no return type
+    "PLR2004",
+    "INP001",
+    "N812",
+    "FBT003",
+    "S311",
+    "ANN201",
     "RUF012",
     "T201",
     "PT009",
@@ -57,8 +62,4 @@ upgrade = true
 package = true
 
 [dependency-groups]
-dev = [
-    "pytest>=8.3.5",
- "pytest-cov>=6.1.1",
- "ruff>=0.11.10",
-]
+dev = ["pytest>=8.3.5", "pytest-cov>=6.1.1", "ruff>=0.11.10"]
