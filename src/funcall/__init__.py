@@ -1,3 +1,5 @@
+import asyncio
+import concurrent.futures
 import dataclasses
 import inspect
 import json
@@ -142,6 +144,11 @@ def _convert_arg(value: object, hint: type) -> object:  # noqa: PLR0911
     return value
 
 
+def _is_async_function(func: Callable) -> bool:
+    """检查函数是否为异步函数"""
+    return inspect.iscoroutinefunction(func)
+
+
 class Funcall:
     def __init__(self, functions: list | None = None) -> None:
         if functions is None:
@@ -153,65 +160,132 @@ class Funcall:
     def get_tools(self, target: Literal["openai", "litellm"] = "openai") -> list[FunctionToolParam]:
         return [generate_meta(func, target) for func in self.functions]
 
+    def _prepare_function_call(self, func_name: str, args: str, context: object = None) -> tuple[Callable, dict]:
+        """准备函数调用的通用逻辑"""
+        if func_name not in self.function_map:
+            msg = f"Function {func_name} not found"
+            raise ValueError(msg)
+
+        func = self.function_map[func_name]
+        sig = inspect.signature(func)
+        type_hints = get_type_hints(func)
+        kwargs = json.loads(args)
+
+        # 找出所有非 context 参数
+        non_context_params = [name for name in sig.parameters if not (getattr(type_hints.get(name, str), "__origin__", None) is Context or type_hints.get(name, str) is Context)]
+
+        # 如果只有一个非 context 参数，且 kwargs 不是以该参数名为 key 的 dict，则包裹
+        if len(non_context_params) == 1 and (not isinstance(kwargs, dict) or set(kwargs.keys()) != set(non_context_params)):
+            only_param = non_context_params[0]
+            kwargs = {only_param: kwargs}
+
+        new_kwargs = {}
+        for name in sig.parameters:
+            hint = type_hints.get(name, str)
+            if getattr(hint, "__origin__", None) is Context or hint is Context:
+                new_kwargs[name] = context
+            elif name in kwargs:
+                new_kwargs[name] = _convert_arg(kwargs[name], hint)
+
+        return func, new_kwargs
+
     def handle_openai_function_call(self, item: ResponseFunctionToolCall, context: object = None):
+        """同步处理 OpenAI 函数调用"""
         if not isinstance(item, ResponseFunctionToolCall):
             msg = "item must be an instance of ResponseFunctionToolCall"
             raise TypeError(msg)
-        if item.name not in self.function_map:
-            msg = f"Function {item.name} not found"
-            raise ValueError(msg)
-        func = self.function_map[item.name]
-        args = item.arguments
-        sig = inspect.signature(func)
-        type_hints = get_type_hints(func)
-        kwargs = json.loads(args)
-        # 找出所有非 context 参数
-        non_context_params = [name for name in sig.parameters if not (getattr(type_hints.get(name, str), "__origin__", None) is Context or type_hints.get(name, str) is Context)]
-        # 如果只有一个非 context 参数，且 kwargs 不是以该参数名为 key 的 dict，则包裹
-        if len(non_context_params) == 1 and (not isinstance(kwargs, dict) or set(kwargs.keys()) != set(non_context_params)):
-            only_param = non_context_params[0]
-            kwargs = {only_param: kwargs}
-        new_kwargs = {}
-        for name in sig.parameters:
-            hint = type_hints.get(name, str)
-            if getattr(hint, "__origin__", None) is Context or hint is Context:
-                new_kwargs[name] = context
-            elif name in kwargs:
-                new_kwargs[name] = _convert_arg(kwargs[name], hint)
-        return func(**new_kwargs)
+
+        func, kwargs = self._prepare_function_call(item.name, item.arguments, context)
+
+        if _is_async_function(func):
+            logger.warning("Function %s is async but being called synchronously. Consider using handle_openai_function_call_async.", item.name)
+            # 在同步上下文中运行异步函数
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # 如果已经在事件循环中，创建新的任务
+
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, func(**kwargs))
+                        return future.result()
+                else:
+                    return loop.run_until_complete(func(**kwargs))
+            except RuntimeError:
+                # 没有事件循环，创建新的
+                return asyncio.run(func(**kwargs))
+        else:
+            return func(**kwargs)
+
+    async def handle_openai_function_call_async(self, item: ResponseFunctionToolCall, context: object = None):
+        """异步处理 OpenAI 函数调用"""
+        if not isinstance(item, ResponseFunctionToolCall):
+            msg = "item must be an instance of ResponseFunctionToolCall"
+            raise TypeError(msg)
+
+        func, kwargs = self._prepare_function_call(item.name, item.arguments, context)
+
+        if _is_async_function(func):
+            return await func(**kwargs)
+        # 在线程池中运行同步函数，避免阻塞事件循环
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: func(**kwargs))
 
     def handle_litellm_function_call(self, item: litellm.ChatCompletionMessageToolCall, context: object = None):
+        """同步处理 LiteLLM 函数调用"""
         if not isinstance(item, litellm.ChatCompletionMessageToolCall):
             msg = "item must be an instance of litellm.ChatCompletionMessageToolCall"
             raise TypeError(msg)
-        if item.function.name not in self.function_map:
-            msg = f"Function {item.function.name} not found"
-            raise ValueError(msg)
-        func = self.function_map[item.function.name]
-        args = item.function.arguments
-        sig = inspect.signature(func)
-        type_hints = get_type_hints(func)
-        kwargs = json.loads(args)
-        # 找出所有非 context 参数
-        non_context_params = [name for name in sig.parameters if not (getattr(type_hints.get(name, str), "__origin__", None) is Context or type_hints.get(name, str) is Context)]
-        # 如果只有一个非 context 参数，且 kwargs 不是以该参数名为 key 的 dict，则包裹
-        if len(non_context_params) == 1 and (not isinstance(kwargs, dict) or set(kwargs.keys()) != set(non_context_params)):
-            only_param = non_context_params[0]
-            kwargs = {only_param: kwargs}
-        new_kwargs = {}
-        for name in sig.parameters:
-            hint = type_hints.get(name, str)
-            if getattr(hint, "__origin__", None) is Context or hint is Context:
-                new_kwargs[name] = context
-            elif name in kwargs:
-                new_kwargs[name] = _convert_arg(kwargs[name], hint)
-        return func(**new_kwargs)
+
+        func, kwargs = self._prepare_function_call(item.function.name, item.function.arguments, context)
+
+        if _is_async_function(func):
+            logger.warning("Function %s is async but being called synchronously. Consider using handle_litellm_function_call_async.", item.function.name)
+            # 在同步上下文中运行异步函数
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # 如果已经在事件循环中，创建新的任务
+
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, func(**kwargs))
+                        return future.result()
+                else:
+                    return loop.run_until_complete(func(**kwargs))
+            except RuntimeError:
+                # 没有事件循环，创建新的
+                return asyncio.run(func(**kwargs))
+        else:
+            return func(**kwargs)
+
+    async def handle_litellm_function_call_async(self, item: litellm.ChatCompletionMessageToolCall, context: object = None):
+        """异步处理 LiteLLM 函数调用"""
+        if not isinstance(item, litellm.ChatCompletionMessageToolCall):
+            msg = "item must be an instance of litellm.ChatCompletionMessageToolCall"
+            raise TypeError(msg)
+
+        func, kwargs = self._prepare_function_call(item.function.name, item.function.arguments, context)
+
+        if _is_async_function(func):
+            return await func(**kwargs)
+        # 在线程池中运行同步函数，避免阻塞事件循环
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: func(**kwargs))
 
     def handle_function_call(self, item: ResponseFunctionToolCall | litellm.ChatCompletionMessageToolCall, context: object = None):
+        """同步函数调用处理"""
         if isinstance(item, ResponseFunctionToolCall):
             return self.handle_openai_function_call(item, context)
         if isinstance(item, litellm.ChatCompletionMessageToolCall):
             return self.handle_litellm_function_call(item, context)
+        msg = "item must be an instance of ResponseFunctionToolCall or litellm.ChatCompletionMessageToolCall"
+        raise TypeError(msg)
+
+    async def handle_function_call_async(self, item: ResponseFunctionToolCall | litellm.ChatCompletionMessageToolCall, context: object = None):
+        """异步函数调用处理"""
+        if isinstance(item, ResponseFunctionToolCall):
+            return await self.handle_openai_function_call_async(item, context)
+        if isinstance(item, litellm.ChatCompletionMessageToolCall):
+            return await self.handle_litellm_function_call_async(item, context)
         msg = "item must be an instance of ResponseFunctionToolCall or litellm.ChatCompletionMessageToolCall"
         raise TypeError(msg)
 
