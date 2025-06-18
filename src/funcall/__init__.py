@@ -14,7 +14,7 @@ from openai.types.responses import (
 )
 from pydantic import BaseModel
 
-from .params_to_schema import params_to_schema
+from funcall.params_to_schema import params_to_schema
 
 logger = getLogger("funcall")
 
@@ -22,11 +22,15 @@ T = TypeVar("T")
 
 
 class Context(Generic[T]):
+    """Generic context container for dependency injection in function calls."""
+
     def __init__(self, value: T | None = None) -> None:
         self.value = value
 
 
-class LiteLLMFunctionToolParam(TypedDict):
+class LiteLLMFunctionSpec(TypedDict):
+    """Type definition for LiteLLM function specification."""
+
     name: Required[str]
     parameters: Required[dict[str, object] | None]
     strict: Required[bool | None]
@@ -35,259 +39,473 @@ class LiteLLMFunctionToolParam(TypedDict):
 
 
 class LiteLLMFunctionToolParam(TypedDict):
+    """Type definition for LiteLLM function tool parameter."""
+
     type: Literal["function"]
-    function: Required[LiteLLMFunctionToolParam]
+    function: Required[LiteLLMFunctionSpec]
 
 
-def generate_meta(func: Callable, target: Literal["openai", "litellm"] = "openai") -> FunctionToolParam:
-    sig = inspect.signature(func)
+def generate_function_metadata(
+    func: Callable,
+    target: Literal["openai", "litellm"] = "openai",
+) -> FunctionToolParam | LiteLLMFunctionToolParam:
+    """
+    Generate function metadata for OpenAI or LiteLLM function calling.
+
+    Args:
+        func: The function to generate metadata for
+        target: Target platform ("openai" or "litellm")
+
+    Returns:
+        Function metadata in the appropriate format
+    """
+    signature = inspect.signature(func)
     type_hints = get_type_hints(func)
-    doc = func.__doc__.strip() if func.__doc__ else ""
+    description = func.__doc__.strip() if func.__doc__ else ""
+
+    # Extract non-context parameters
+    param_names, param_types, context_count = _extract_parameters(signature, type_hints)
+
+    if context_count > 1:
+        logger.warning(
+            "Multiple Context-type parameters detected in function '%s'. Only one context instance will be injected at runtime.",
+            func.__name__,
+        )
+
+    schema = params_to_schema(param_types)
+
+    # Handle single parameter case (dataclass or BaseModel)
+    if len(param_names) == 1:
+        metadata = _generate_single_param_metadata(
+            func,
+            param_types[0],
+            schema,
+            description,
+            target,
+        )
+        if metadata:
+            return metadata
+
+    # Handle multiple parameters case
+    return _generate_multi_param_metadata(func, param_names, schema, description, target)
+
+
+def _extract_parameters(signature: inspect.Signature, type_hints: dict) -> tuple[list[str], list[type], int]:
+    """Extract parameter information from function signature."""
     param_names = []
     param_types = []
-    context_param_count = 0
-    for name in sig.parameters:
+    context_count = 0
+
+    for name in signature.parameters:
         hint = type_hints.get(name, str)
-        # 跳过所有类型为 Context 的参数
-        if getattr(hint, "__origin__", None) is Context or hint is Context:
-            context_param_count += 1
+
+        # Skip Context-type parameters
+        if _is_context_type(hint):
+            context_count += 1
             continue
+
         param_names.append(name)
         param_types.append(hint)
-    if context_param_count > 1:
-        logger.warning("Multiple Context-type parameters detected in function '%s'. Only one context instance will be injected at runtime.", func.__name__)
-    schema = params_to_schema(param_types)
-    # 单参数且为 dataclass 或 BaseModel，提升其字段为顶层
-    if len(param_names) == 1:
-        hint = param_types[0]
-        if isinstance(hint, type) and (dataclasses.is_dataclass(hint) or (BaseModel and issubclass(hint, BaseModel))):
-            prop = schema["properties"]["param_0"]
-            properties = prop["properties"]
-            required = prop.get("required", [])
-            additional = prop.get("additionalProperties", False)
-            if target == "litellm":
-                meta = {
-                    "type": "function",
-                    "function": {
-                        "name": func.__name__,
-                        "description": doc,
-                        "parameters": {
-                            "type": "object",
-                            "properties": properties,
-                            # litellm Function Calling 要求 required 必须包含所有字段
-                            "required": list(properties.keys()) if required else [],
-                            "additionalProperties": additional,
-                        },
-                    },
-                }
-            elif target == "openai":
-                meta: FunctionToolParam = {
-                    "type": "function",
-                    "name": func.__name__,
-                    "description": doc,
-                    "parameters": {
-                        "type": "object",
-                        "properties": properties,
-                        # OpenAI Function Calling 要求 required 必须包含所有字段
-                        "required": list(properties.keys()),
-                        "additionalProperties": additional,
-                    },
-                    "strict": True,
-                }
-            return meta
-    # 多参数或非 dataclass/BaseModel
-    properties = {}
-    required = []
-    for i, name in enumerate(param_names):
-        prop = schema["properties"][f"param_{i}"]
-        properties[name] = prop
-        required.append(name)
-    meta: FunctionToolParam = {
+
+    return param_names, param_types, context_count
+
+
+def _is_context_type(hint: type) -> bool:
+    """Check if a type hint is a Context type."""
+    return getattr(hint, "__origin__", None) is Context or hint is Context
+
+
+def _generate_single_param_metadata(
+    func: Callable,
+    param_type: type,
+    schema: dict,
+    description: str,
+    target: str,
+) -> FunctionToolParam | LiteLLMFunctionToolParam | None:
+    """Generate metadata for functions with a single dataclass/BaseModel parameter."""
+    if not (isinstance(param_type, type) and (dataclasses.is_dataclass(param_type) or (BaseModel and issubclass(param_type, BaseModel)))):
+        return None
+
+    prop = schema["properties"]["param_0"]
+    properties = prop["properties"]
+    required = prop.get("required", [])
+    additional_properties = prop.get("additionalProperties", False)
+
+    base_params = {
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": additional_properties,
+    }
+
+    if target == "litellm":
+        return {
+            "type": "function",
+            "function": {
+                "name": func.__name__,
+                "description": description,
+                "parameters": {
+                    **base_params,
+                    "required": list(properties.keys()) if required else [],
+                },
+            },
+        }
+
+    # OpenAI format
+    metadata: FunctionToolParam = {
         "type": "function",
         "name": func.__name__,
-        "description": doc,
+        "description": description,
         "parameters": {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-            "additionalProperties": False,
+            **base_params,
+            "required": list(properties.keys()),
         },
         "strict": True,
     }
+    return metadata
+
+
+def _generate_multi_param_metadata(
+    func: Callable,
+    param_names: list[str],
+    schema: dict,
+    description: str,
+    target: str,
+) -> FunctionToolParam | LiteLLMFunctionToolParam:
+    """Generate metadata for functions with multiple parameters."""
+    properties = {}
+    for i, name in enumerate(param_names):
+        properties[name] = schema["properties"][f"param_{i}"]
+
+    base_params = {
+        "type": "object",
+        "properties": properties,
+        "additionalProperties": False,
+    }
+
+    if target == "litellm":
+        return {
+            "type": "function",
+            "function": {
+                "name": func.__name__,
+                "description": description,
+                "parameters": {
+                    **base_params,
+                    "required": list(properties.keys()),
+                },
+            },
+        }
+
+    # OpenAI format
+    metadata: FunctionToolParam = {
+        "type": "function",
+        "name": func.__name__,
+        "description": description,
+        "parameters": {
+            **base_params,
+            "required": list(param_names),
+        },
+        "strict": True,
+    }
+
     if "$defs" in schema:
-        meta["parameters"]["$defs"] = schema["$defs"]
-    return meta
+        metadata["parameters"]["$defs"] = schema["$defs"]
+
+    return metadata
 
 
-def _convert_arg(value: object, hint: type) -> object:  # noqa: PLR0911
+def _convert_argument_type(value: object, hint: type) -> object:
+    """
+    Convert argument values to match expected types.
+
+    Args:
+        value: The value to convert
+        hint: The type hint to convert to
+
+    Returns:
+        Converted value
+    """
     origin = getattr(hint, "__origin__", None)
+    result = value
+
+    # Handle collection types
     if origin in (list, set, tuple):
         args = get_args(hint)
         item_type = args[0] if args else str
-        return [_convert_arg(v, item_type) for v in value]
-    if origin is dict:
-        return value
-    if getattr(hint, "__origin__", None) is Union:
+        result = [_convert_argument_type(v, item_type) for v in value]
+    elif origin is dict:
+        result = value
+    elif origin is Union:
         args = get_args(hint)
-        non_none = [a for a in args if a is not type(None)]
-        return _convert_arg(value, non_none[0]) if len(non_none) == 1 else value
-    if isinstance(hint, type) and BaseModel and issubclass(hint, BaseModel):
+        non_none_types = [a for a in args if a is not type(None)]
+        result = _convert_argument_type(value, non_none_types[0]) if len(non_none_types) == 1 else value
+    elif isinstance(hint, type) and BaseModel and issubclass(hint, BaseModel):
         if isinstance(value, dict):
             fields = hint.model_fields
-            return hint(**{k: _convert_arg(v, fields[k].annotation) if k in fields else v for k, v in value.items()})
-        return value
-    if dataclasses.is_dataclass(hint):
+            converted_data = {k: _convert_argument_type(v, fields[k].annotation) if k in fields else v for k, v in value.items()}
+            result = hint(**converted_data)
+        else:
+            result = value
+    elif dataclasses.is_dataclass(hint):
         if isinstance(value, dict):
             field_types = {f.name: f.type for f in dataclasses.fields(hint)}
-            return hint(**{k: _convert_arg(v, field_types.get(k, type(v))) for k, v in value.items()})
-        return value
-    return value
+            converted_data = {k: _convert_argument_type(v, field_types.get(k, type(v))) for k, v in value.items()}
+            result = hint(**converted_data)
+        else:
+            result = value
+
+    return result
 
 
 def _is_async_function(func: Callable) -> bool:
-    """检查函数是否为异步函数"""
+    """Check if a function is asynchronous."""
     return inspect.iscoroutinefunction(func)
 
 
 class Funcall:
-    def __init__(self, functions: list | None = None) -> None:
-        if functions is None:
-            functions = []
-        self.functions = functions
-        self.function_map = {func.__name__: func for func in functions}
+    """Handler for function calling in LLM interactions."""
 
-    # target 可以是 openai 或者 litellm
+    def __init__(self, functions: list[Callable] | None = None) -> None:
+        """
+        Initialize the function call handler.
+
+        Args:
+            functions: List of functions to register
+        """
+        self.functions = functions or []
+        self.function_registry = {func.__name__: func for func in self.functions}
+
     def get_tools(self, target: Literal["openai", "litellm"] = "openai") -> list[FunctionToolParam]:
-        return [generate_meta(func, target) for func in self.functions]
+        """
+        Get tool definitions for the specified target platform.
 
-    def _prepare_function_call(self, func_name: str, args: str, context: object = None) -> tuple[Callable, dict]:
-        """准备函数调用的通用逻辑"""
-        if func_name not in self.function_map:
+        Args:
+            target: Target platform ("openai" or "litellm")
+
+        Returns:
+            List of function tool parameters
+        """
+        return [generate_function_metadata(func, target) for func in self.functions]
+
+    def _prepare_function_execution(
+        self,
+        func_name: str,
+        args: str,
+        context: object = None,
+    ) -> tuple[Callable, dict]:
+        """
+        Prepare function call arguments and context injection.
+
+        Args:
+            func_name: Name of the function to call
+            args: JSON string of function arguments
+            context: Context object to inject
+
+        Returns:
+            Tuple of (function, prepared_kwargs)
+        """
+        if func_name not in self.function_registry:
             msg = f"Function {func_name} not found"
             raise ValueError(msg)
 
-        func = self.function_map[func_name]
-        sig = inspect.signature(func)
+        func = self.function_registry[func_name]
+        signature = inspect.signature(func)
         type_hints = get_type_hints(func)
-        kwargs = json.loads(args)
+        arguments = json.loads(args)
 
-        # 找出所有非 context 参数
-        non_context_params = [name for name in sig.parameters if not (getattr(type_hints.get(name, str), "__origin__", None) is Context or type_hints.get(name, str) is Context)]
+        # Find non-context parameters
+        non_context_params = [name for name in signature.parameters if not _is_context_type(type_hints.get(name, str))]
 
-        # 如果只有一个非 context 参数，且 kwargs 不是以该参数名为 key 的 dict，则包裹
-        if len(non_context_params) == 1 and (not isinstance(kwargs, dict) or set(kwargs.keys()) != set(non_context_params)):
-            only_param = non_context_params[0]
-            kwargs = {only_param: kwargs}
+        # Handle single parameter case
+        if len(non_context_params) == 1 and (not isinstance(arguments, dict) or set(arguments.keys()) != set(non_context_params)):
+            arguments = {non_context_params[0]: arguments}
 
-        new_kwargs = {}
-        for name in sig.parameters:
-            hint = type_hints.get(name, str)
-            if getattr(hint, "__origin__", None) is Context or hint is Context:
-                new_kwargs[name] = context
-            elif name in kwargs:
-                new_kwargs[name] = _convert_arg(kwargs[name], hint)
+        # Prepare final kwargs with type conversion and context injection
+        prepared_kwargs = {}
+        for param_name in signature.parameters:
+            hint = type_hints.get(param_name, str)
 
-        return func, new_kwargs
+            if _is_context_type(hint):
+                prepared_kwargs[param_name] = context
+            elif param_name in arguments:
+                prepared_kwargs[param_name] = _convert_argument_type(arguments[param_name], hint)
 
-    def handle_openai_function_call(self, item: ResponseFunctionToolCall, context: object = None):
-        """同步处理 OpenAI 函数调用"""
-        if not isinstance(item, ResponseFunctionToolCall):
-            msg = "item must be an instance of ResponseFunctionToolCall"
+        return func, prepared_kwargs
+
+    def _execute_sync_in_async_context(self, func: Callable, kwargs: dict) -> object:
+        """Execute synchronous function in async context safely."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If already in event loop, use thread pool
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, func(**kwargs))
+                    return future.result()
+            else:
+                return loop.run_until_complete(func(**kwargs))
+        except RuntimeError:
+            # No event loop exists, create new one
+            return asyncio.run(func(**kwargs))
+
+    def handle_openai_function_call(
+        self,
+        call: ResponseFunctionToolCall,
+        context: object = None,
+    ) -> object:
+        """
+        Handle OpenAI function call synchronously.
+
+        Args:
+            call: OpenAI function tool call
+            context: Context object to inject
+
+        Returns:
+            Function execution result
+        """
+        if not isinstance(call, ResponseFunctionToolCall):
+            msg = "call must be an instance of ResponseFunctionToolCall"
             raise TypeError(msg)
 
-        func, kwargs = self._prepare_function_call(item.name, item.arguments, context)
+        func, kwargs = self._prepare_function_execution(call.name, call.arguments, context)
 
         if _is_async_function(func):
-            logger.warning("Function %s is async but being called synchronously. Consider using handle_openai_function_call_async.", item.name)
-            # 在同步上下文中运行异步函数
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 如果已经在事件循环中，创建新的任务
+            logger.warning(
+                "Function %s is async but being called synchronously. Consider using handle_openai_function_call_async.",
+                call.name,
+            )
+            return self._execute_sync_in_async_context(func, kwargs)
 
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, func(**kwargs))
-                        return future.result()
-                else:
-                    return loop.run_until_complete(func(**kwargs))
-            except RuntimeError:
-                # 没有事件循环，创建新的
-                return asyncio.run(func(**kwargs))
-        else:
-            return func(**kwargs)
+        return func(**kwargs)
 
-    async def handle_openai_function_call_async(self, item: ResponseFunctionToolCall, context: object = None):
-        """异步处理 OpenAI 函数调用"""
-        if not isinstance(item, ResponseFunctionToolCall):
-            msg = "item must be an instance of ResponseFunctionToolCall"
-            raise TypeError(msg)
+    async def handle_openai_function_call_async(
+        self,
+        call: ResponseFunctionToolCall,
+        context: object = None,
+    ) -> object:
+        """
+        Handle OpenAI function call asynchronously.
 
-        func, kwargs = self._prepare_function_call(item.name, item.arguments, context)
+        Args:
+            call: OpenAI function tool call
+            context: Context object to inject
 
-        if _is_async_function(func):
-            return await func(**kwargs)
-        # 在线程池中运行同步函数，避免阻塞事件循环
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: func(**kwargs))
+        Returns:
+            Function execution result
+        """
 
-    def handle_litellm_function_call(self, item: litellm.ChatCompletionMessageToolCall, context: object = None):
-        """同步处理 LiteLLM 函数调用"""
-        if not isinstance(item, litellm.ChatCompletionMessageToolCall):
-            msg = "item must be an instance of litellm.ChatCompletionMessageToolCall"
-            raise TypeError(msg)
-
-        func, kwargs = self._prepare_function_call(item.function.name, item.function.arguments, context)
-
-        if _is_async_function(func):
-            logger.warning("Function %s is async but being called synchronously. Consider using handle_litellm_function_call_async.", item.function.name)
-            # 在同步上下文中运行异步函数
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 如果已经在事件循环中，创建新的任务
-
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, func(**kwargs))
-                        return future.result()
-                else:
-                    return loop.run_until_complete(func(**kwargs))
-            except RuntimeError:
-                # 没有事件循环，创建新的
-                return asyncio.run(func(**kwargs))
-        else:
-            return func(**kwargs)
-
-    async def handle_litellm_function_call_async(self, item: litellm.ChatCompletionMessageToolCall, context: object = None):
-        """异步处理 LiteLLM 函数调用"""
-        if not isinstance(item, litellm.ChatCompletionMessageToolCall):
-            msg = "item must be an instance of litellm.ChatCompletionMessageToolCall"
-            raise TypeError(msg)
-
-        func, kwargs = self._prepare_function_call(item.function.name, item.function.arguments, context)
+        func, kwargs = self._prepare_function_execution(call.name, call.arguments, context)
 
         if _is_async_function(func):
             return await func(**kwargs)
-        # 在线程池中运行同步函数，避免阻塞事件循环
+
+        # Run sync function in thread pool to avoid blocking event loop
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: func(**kwargs))
 
-    def handle_function_call(self, item: ResponseFunctionToolCall | litellm.ChatCompletionMessageToolCall, context: object = None):
-        """同步函数调用处理"""
-        if isinstance(item, ResponseFunctionToolCall):
-            return self.handle_openai_function_call(item, context)
-        if isinstance(item, litellm.ChatCompletionMessageToolCall):
-            return self.handle_litellm_function_call(item, context)
-        msg = "item must be an instance of ResponseFunctionToolCall or litellm.ChatCompletionMessageToolCall"
+    def handle_litellm_function_call(
+        self,
+        call: litellm.ChatCompletionMessageToolCall,
+        context: object = None,
+    ) -> object:
+        """
+        Handle LiteLLM function call synchronously.
+
+        Args:
+            call: LiteLLM function tool call
+            context: Context object to inject
+
+        Returns:
+            Function execution result
+        """
+        func, kwargs = self._prepare_function_execution(
+            call.function.name,
+            call.function.arguments,
+            context,
+        )
+
+        if _is_async_function(func):
+            logger.warning(
+                "Function %s is async but being called synchronously. Consider using handle_litellm_function_call_async.",
+                call.function.name,
+            )
+            return self._execute_sync_in_async_context(func, kwargs)
+
+        return func(**kwargs)
+
+    async def handle_litellm_function_call_async(
+        self,
+        call: litellm.ChatCompletionMessageToolCall,
+        context: object = None,
+    ) -> object:
+        """
+        Handle LiteLLM function call asynchronously.
+
+        Args:
+            call: LiteLLM function tool call
+            context: Context object to inject
+
+        Returns:
+            Function execution result
+        """
+        if not isinstance(call, litellm.ChatCompletionMessageToolCall):
+            msg = "call must be an instance of litellm.ChatCompletionMessageToolCall"
+            raise TypeError(msg)
+
+        func, kwargs = self._prepare_function_execution(
+            call.function.name,
+            call.function.arguments,
+            context,
+        )
+
+        if _is_async_function(func):
+            return await func(**kwargs)
+
+        # Run sync function in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: func(**kwargs))
+
+    def handle_function_call(
+        self,
+        call: ResponseFunctionToolCall | litellm.ChatCompletionMessageToolCall,
+        context: object = None,
+    ) -> object:
+        """
+        Handle function call synchronously (unified interface).
+
+        Args:
+            call: Function tool call (OpenAI or LiteLLM)
+            context: Context object to inject
+
+        Returns:
+            Function execution result
+        """
+        if isinstance(call, ResponseFunctionToolCall):
+            return self.handle_openai_function_call(call, context)
+        if isinstance(call, litellm.ChatCompletionMessageToolCall):
+            return self.handle_litellm_function_call(call, context)
+        msg = "call must be an instance of ResponseFunctionToolCall or litellm.ChatCompletionMessageToolCall"
         raise TypeError(msg)
 
-    async def handle_function_call_async(self, item: ResponseFunctionToolCall | litellm.ChatCompletionMessageToolCall, context: object = None):
-        """异步函数调用处理"""
-        if isinstance(item, ResponseFunctionToolCall):
-            return await self.handle_openai_function_call_async(item, context)
-        if isinstance(item, litellm.ChatCompletionMessageToolCall):
-            return await self.handle_litellm_function_call_async(item, context)
-        msg = "item must be an instance of ResponseFunctionToolCall or litellm.ChatCompletionMessageToolCall"
+    async def handle_function_call_async(
+        self,
+        call: ResponseFunctionToolCall | litellm.ChatCompletionMessageToolCall,
+        context: object = None,
+    ) -> object:
+        """
+        Handle function call asynchronously (unified interface).
+
+        Args:
+            call: Function tool call (OpenAI or LiteLLM)
+            context: Context object to inject
+
+        Returns:
+            Function execution result
+        """
+        if isinstance(call, ResponseFunctionToolCall):
+            return await self.handle_openai_function_call_async(call, context)
+        if isinstance(call, litellm.ChatCompletionMessageToolCall):
+            return await self.handle_litellm_function_call_async(call, context)
+        msg = "call must be an instance of ResponseFunctionToolCall or litellm.ChatCompletionMessageToolCall"
         raise TypeError(msg)
 
 
-__all__ = ["Context", "Funcall", "generate_meta"]
+__all__ = ["Context", "Funcall", "generate_function_metadata"]
