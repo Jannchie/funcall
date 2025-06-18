@@ -3,6 +3,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+from litellm import ResponseFunctionToolCall
 from pydantic import BaseModel, Field
 
 from funcall import Context, Funcall, generate_meta
@@ -19,10 +20,8 @@ def resolve_ref(schema: dict, ref: str) -> dict:
     return schema["$defs"][def_name]
 
 
-class DummyResponseFunctionToolCall:
-    def __init__(self, name: str, arguments: str) -> None:
-        self.name = name
-        self.arguments = arguments
+def get_dummy_response_function_tool_call(name: str, arguments: str) -> ResponseFunctionToolCall:
+    return ResponseFunctionToolCall(name=name, arguments=arguments, call_id="dummy_call_id", type="function_call")
 
 
 def test_generate_meta_normal_func():
@@ -132,8 +131,8 @@ def test_handle_function_call_normal():
         return a + b
 
     fc = Funcall([add])
-    item = DummyResponseFunctionToolCall("add", json.dumps({"a": 1, "b": 2}))
-    with patch("funcall.__init__.ResponseFunctionToolCall", DummyResponseFunctionToolCall):
+    item = get_dummy_response_function_tool_call("add", json.dumps({"a": 1, "b": 2}))
+    with patch("funcall.__init__.ResponseFunctionToolCall", get_dummy_response_function_tool_call):
         result = fc.handle_function_call(item)
     assert result == 3
 
@@ -154,14 +153,14 @@ def test_handle_function_call_basemodel():
 
     foo.__annotations__ = {"data": MyModel}
     fc = Funcall([foo])
-    item = DummyResponseFunctionToolCall("foo", json.dumps({"x": 5}))
+    item = get_dummy_response_function_tool_call("foo", json.dumps({"x": 5}))
     result = fc.handle_function_call(item)
     assert result == 10
 
 
 def test_handle_function_call_not_found():
     fc = Funcall([])
-    item = DummyResponseFunctionToolCall("not_exist", "{}")
+    item = get_dummy_response_function_tool_call("not_exist", "{}")
     with pytest.raises(ValueError, match="Function not_exist not found"):
         fc.handle_function_call(item)
 
@@ -171,7 +170,7 @@ def test_handle_function_call_invalid_json():
         return a + b
 
     fc = Funcall([add])
-    item = DummyResponseFunctionToolCall("add", "not a json")
+    item = get_dummy_response_function_tool_call("add", "not a json")
     with pytest.raises(json.JSONDecodeError):
         fc.handle_function_call(item)
 
@@ -187,8 +186,8 @@ def test_generate_meta_param_type_dataclass():
 
     meta = generate_meta(foo)
     fc = Funcall([foo])
-    item = DummyResponseFunctionToolCall("foo", json.dumps({"a": 1, "b": "test"}))
-    with patch("funcall.__init__.ResponseFunctionToolCall", DummyResponseFunctionToolCall):
+    item = get_dummy_response_function_tool_call("foo", json.dumps({"a": 1, "b": "test"}))
+    with patch("funcall.__init__.ResponseFunctionToolCall", get_dummy_response_function_tool_call):
         fc.handle_function_call(item)
     props = meta["parameters"]["properties"]
     assert "a" in props
@@ -218,7 +217,7 @@ def test_handle_function_call_with_context_dataclass():
     assert "ctx" not in props
     assert "a" in props
     fc = Funcall([foo])
-    item = DummyResponseFunctionToolCall("foo", json.dumps({"a": 42}))
+    item = get_dummy_response_function_tool_call("foo", json.dumps({"a": 42}))
     ctx = Context(MyCtx(user="alice"))
     result = fc.handle_function_call(item, context=ctx)
     assert result == "42-alice"
@@ -240,7 +239,7 @@ def test_handle_function_call_with_context_pydantic():
     assert "whatever" not in props
     assert "a" in props
     fc = Funcall([foo])
-    item = DummyResponseFunctionToolCall("foo", json.dumps({"a": 7}))
+    item = get_dummy_response_function_tool_call("foo", json.dumps({"a": 7}))
     ctx = Context(MyCtx(user="bob"))
     result = fc.handle_function_call(item, context=ctx)
     assert result == "7-bob"
@@ -268,7 +267,7 @@ def test_generate_meta_multiple_contexts_warns_and_injects(caplog: pytest.LogCap
     # warning 被触发
     assert any("Multiple Context-type parameters detected" in r.message for r in caplog.records)
     fc = Funcall([foo])
-    item = DummyResponseFunctionToolCall("foo", json.dumps({"a": 1}))
+    item = get_dummy_response_function_tool_call("foo", json.dumps({"a": 1}))
     ctx = Context(MyCtx(user="alice"))
     result = fc.handle_function_call(item, context=ctx)
     # 两个 context 参数都注入同一个实例
