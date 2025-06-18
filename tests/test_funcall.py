@@ -3,9 +3,20 @@ import json
 from unittest.mock import patch
 
 import pytest
-from pydantic import Field
+from pydantic import BaseModel, Field
 
-from funcall import Funcall, generate_meta
+from funcall import Context, Funcall, generate_meta
+
+
+class UnsupportedRefError(ValueError):
+    """Exception raised for unsupported references."""
+
+
+def resolve_ref(schema: dict, ref: str) -> dict:
+    if not ref.startswith("#/$defs/"):
+        raise UnsupportedRefError("Unsupported ref: " + ref)
+    def_name = ref.split("/", 2)[-1]
+    return schema["$defs"][def_name]
 
 
 class DummyResponseFunctionToolCall:
@@ -22,14 +33,14 @@ def test_generate_meta_normal_func():
     meta = generate_meta(add)
     assert meta["name"] == "add"
     assert meta["description"] == "Add two numbers"
-    assert meta["parameters"]["properties"]["a"]["type"] == "number"
+    props = meta["parameters"]["properties"]
+    assert props["a"]["type"] == "integer"
+    assert props["b"]["type"] == "integer"
     assert "a" in meta["parameters"]["required"]
     assert "b" in meta["parameters"]["required"]
 
 
 def test_generate_meta_pydantic():
-    from pydantic import BaseModel
-
     class FooModel(BaseModel):
         x: int
         y: int | None = None
@@ -41,10 +52,14 @@ def test_generate_meta_pydantic():
 
     meta = generate_meta(foo)
     assert meta["name"] == "foo"
-    assert "x" in meta["parameters"]["properties"]
+    props = meta["parameters"]["properties"]
+    # 字段直接在顶层
+    assert "x" in props
+    assert "y" in props
+    assert "z" in props
     assert "x" in meta["parameters"]["required"]
-    assert "y" in meta["parameters"]["properties"]
-    assert "y" not in meta["parameters"]["required"]
+    # openai schema 中，即使可选，类型的字段也需要出现在 required 中
+    assert "y" in meta["parameters"]["required"]
 
 
 def test_generate_meta_dataclass():
@@ -59,10 +74,12 @@ def test_generate_meta_dataclass():
 
     meta = generate_meta(bar)
     assert meta["name"] == "bar"
-    assert "x" in meta["parameters"]["properties"]
+    props = meta["parameters"]["properties"]
+    assert "x" in props
+    assert "y" in props
     assert "x" in meta["parameters"]["required"]
-    assert "y" in meta["parameters"]["properties"]
-    assert "y" not in meta["parameters"]["required"]
+    # openai schema 中，即使可选，类型的字段也需要出现在 required 中
+    assert "y" in meta["parameters"]["required"]
 
 
 def test_generate_meta_param_type_builtin_types():
@@ -71,7 +88,7 @@ def test_generate_meta_param_type_builtin_types():
 
     meta = generate_meta(foo)
     props = meta["parameters"]["properties"]
-    assert props["a"]["type"] == "number"
+    assert props["a"]["type"] == "integer"
     assert props["b"]["type"] == "number"
     assert props["c"]["type"] == "string"
     assert props["d"]["type"] == "boolean"
@@ -121,8 +138,6 @@ def test_no_function_call():
 
 
 def test_handle_function_call_basemodel():
-    from pydantic import BaseModel
-
     # 直接用真实的 pydantic BaseModel
     class MyModel(BaseModel):
         x: int
@@ -172,7 +187,106 @@ def test_generate_meta_param_type_dataclass():
     props = meta["parameters"]["properties"]
     assert "a" in props
     assert "b" in props
-    assert props["a"]["type"] == "number"
+    assert props["a"]["type"] == "integer"
     assert props["b"]["type"] == "string"
     assert "a" in meta["parameters"]["required"]
-    assert "b" not in meta["parameters"]["required"]
+    # openai schema 中，即使可选，类型的字段也需要出现在 required 中
+    assert "b" in meta["parameters"]["required"]
+
+
+def test_handle_function_call_with_context_dataclass():
+    @dataclasses.dataclass
+    class MyData:
+        a: int
+
+    @dataclasses.dataclass
+    class MyCtx:
+        user: str
+
+    def foo(data: MyData, ctx: Context[MyCtx]) -> str:
+        return f"{data.a}-{ctx.value.user}"
+
+    meta = generate_meta(foo)
+    # context 参数不应出现在 schema
+    props = meta["parameters"]["properties"]
+    assert "ctx" not in props
+    assert "a" in props
+    fc = Funcall([foo])
+    item = DummyResponseFunctionToolCall("foo", json.dumps({"a": 42}))
+    ctx = Context(MyCtx(user="alice"))
+    result = fc.handle_function_call(item, context=ctx)
+    assert result == "42-alice"
+
+
+def test_handle_function_call_with_context_pydantic():
+    class MyData(BaseModel):
+        a: int
+
+    class MyCtx(BaseModel):
+        user: str
+
+    def foo(data: MyData, whatever: Context[MyCtx]) -> str:
+        return f"{data.a}-{whatever.value.user}"
+
+    meta = generate_meta(foo)
+    # context 参数不应出现在 schema
+    props = meta["parameters"]["properties"]
+    assert "whatever" not in props
+    assert "a" in props
+    fc = Funcall([foo])
+    item = DummyResponseFunctionToolCall("foo", json.dumps({"a": 7}))
+    ctx = Context(MyCtx(user="bob"))
+    result = fc.handle_function_call(item, context=ctx)
+    assert result == "7-bob"
+
+
+def test_generate_meta_multiple_contexts_warns_and_injects(caplog: pytest.LogCaptureFixture):
+    @dataclasses.dataclass
+    class MyData:
+        a: int
+
+    @dataclasses.dataclass
+    class MyCtx:
+        user: str
+
+    def foo(data: MyData, ctx1: Context[MyCtx], ctx2: Context[MyCtx]) -> str:
+        return f"{data.a}-{ctx1.value.user}-{ctx2.value.user}"
+
+    with caplog.at_level("WARNING"):
+        meta = generate_meta(foo)
+    # 两个 context 参数都不应出现在 schema
+    props = meta["parameters"]["properties"]
+    assert "ctx1" not in props
+    assert "ctx2" not in props
+    assert "a" in props
+    # warning 被触发
+    assert any("Multiple Context-type parameters detected" in r.message for r in caplog.records)
+    fc = Funcall([foo])
+    item = DummyResponseFunctionToolCall("foo", json.dumps({"a": 1}))
+    ctx = Context(MyCtx(user="alice"))
+    result = fc.handle_function_call(item, context=ctx)
+    # 两个 context 参数都注入同一个实例
+    assert result == "1-alice-alice"
+
+
+def test_handle_function_call_array_of_pydantic():
+    class Item(BaseModel):
+        name: str
+        value: int
+
+    def sum_values(items: list[Item]) -> int:
+        """Sum the 'value' field of all items in the list."""
+        return sum(item.value for item in items)
+
+    meta = generate_meta(sum_values)
+    # 检查 schema 结构
+    props = meta["parameters"]["properties"]
+    assert props["items"]["type"] == "array"
+    items_schema = props["items"]["items"]
+    # 应为 $ref
+    assert "$ref" in items_schema
+    item_def = resolve_ref(meta["parameters"], items_schema["$ref"])
+    assert item_def["properties"]["name"]["type"] == "string"
+    assert item_def["properties"]["value"]["type"] == "integer"
+    assert set(item_def["required"]) == {"name", "value"}
+    assert item_def["type"] == "object"

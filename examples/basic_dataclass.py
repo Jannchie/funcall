@@ -27,7 +27,7 @@ resp = openai.responses.create(
     input="Use function call to calculate the sum of 114 and 514",
     tools=fc.get_tools(),  # Get the function metadata
 )
-
+print(fc.get_tools())
 for o in resp.output:
     if isinstance(o, ResponseFunctionToolCall):
         result = fc.handle_function_call(o)  # Call the function

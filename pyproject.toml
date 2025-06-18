@@ -10,6 +10,7 @@ dependencies = [
     "openai>=1.79.0",
     "pydantic>=2.11.4",
     "rich>=14.0.0",
+    "typing-inspect>=0.9.0",
 ]
 keywords = ["function call", "openai", "pydantic", "rich", "AI", "tooling"]
 license = { text = "MIT" }
@@ -63,3 +64,6 @@ package = true
 
 [dependency-groups]
 dev = ["pytest>=8.3.5", "pytest-cov>=6.1.1", "ruff>=0.11.10"]
+
+[tool.coverage.run]
+omit = ["tests/*"]
