@@ -44,7 +44,6 @@ def _dataclass_to_pydantic_model(dataclass_type: type) -> type:
         if field.default is not dataclasses.MISSING:
             default_value = field.default
         elif field.default_factory is not dataclasses.MISSING:
-            # 修复：不要立即调用工厂函数，而是传递工厂函数本身
             default_value = field.default_factory
         else:
             default_value = ...
@@ -79,16 +78,15 @@ def to_field_type(param: type) -> type:
     origin = get_origin(param)
     args = get_args(param)
 
-    # 修复：更清晰的类型检查顺序
-    # 首先检查是否是 Pydantic BaseModel
+    # Check if it's a Pydantic BaseModel
     if isinstance(param, type) and issubclass(param, BaseModel):
         return param
 
-    # 检查是否是 dataclass
+    # Check if it's a dataclass
     if is_dataclass(param):
         return _dataclass_to_pydantic_model(param)
 
-    # 处理泛型类型
+    # Handle generic types
     if origin is not None:
         # Union/Optional (compatible with 3.10+ X | Y)
         if origin is TypingUnion or (hasattr(types, "UnionType") and origin is types.UnionType):
@@ -100,7 +98,7 @@ def to_field_type(param: type) -> type:
             item_type = to_field_type(args[0]) if args else TypingAny
             return list[item_type]
 
-        # Dict - 提供更清晰的错误信息
+        # Dict - provide clearer error message
         if origin is dict:
             msg = f"Dict type {param} is not supported directly, use pydantic BaseModel or dataclass instead."
             raise TypeError(msg)
@@ -109,31 +107,33 @@ def to_field_type(param: type) -> type:
         if origin is tuple:
             return _handle_tuple_type(args)
 
-    # 基本类型处理
+    # Basic type handling
     if isinstance(param, type):
         if param is dict:
             msg = "Dict type is not supported directly, use pydantic BaseModel or dataclass instead."
             raise TypeError(msg)
         return param
 
-    # 如果都不匹配，抛出错误
+    # If none match, raise error
     msg = f"Unsupported param type: {param} (type: {type(param)})"
     raise TypeError(msg)
 
 
-def params_to_schema(params: list[Any]) -> dict[str, Any]:
+def params_to_schema(params: list[Any], no_refs: bool = True) -> dict[str, Any]:
     """
     Read a parameter list, which can contain various types, dataclasses, pydantic models, basic types, even nested or nested in lists.
     Output a jsonschema describing this set of parameters.
+
+    Args:
+        params: List of parameter types
+        no_refs: If True, inline all definitions instead of using $ref (default: True)
     """
-    # 修复：添加输入验证
     if not isinstance(params, list):
         msg = "params must be a list"
         raise TypeError(msg)
 
     # Build parameter model
     if not params:
-        # Handle the case of an empty parameter list
         model = create_model("ParamsModel")
     else:
         model_fields = {}
@@ -143,15 +143,68 @@ def params_to_schema(params: list[Any]) -> dict[str, Any]:
 
         model = create_model("ParamsModel", **model_fields)
 
-    schema = model.model_json_schema()
-    _normalize_schema(schema)
+    # Generate schema with explicit mode to avoid $refs
+    if no_refs:
+        schema = model.model_json_schema(mode="serialization")
+    else:
+        schema = model.model_json_schema()
+
+    # Apply additional normalization
+    _normalize_schema(schema, no_refs=no_refs)
+
+    # Remove $defs section if we want no refs
+    if no_refs and "$defs" in schema:
+        schema = _inline_definitions(schema)
 
     return schema
 
 
-def _normalize_schema(schema: dict | list) -> None:
+def _inline_definitions(schema: dict) -> dict:
+    """
+    Inline all $ref definitions to avoid using references
+    """
+    if "$defs" not in schema:
+        return schema
+
+    definitions = schema["$defs"]
+
+    def replace_refs(obj):
+        if isinstance(obj, dict):
+            if "$ref" in obj:
+                # Extract definition name from $ref
+                ref_path = obj["$ref"]
+                if ref_path.startswith("#/$defs/"):
+                    def_name = ref_path[8:]  # Remove "#/$defs/"
+                    if def_name in definitions:
+                        # Replace $ref with inline definition
+                        inline_def = definitions[def_name].copy()
+                        # Recursively replace refs in the inline definition
+                        return replace_refs(inline_def)
+                return obj
+            # Recursively process all dict values
+            return {k: replace_refs(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            # Recursively process all list items
+            return [replace_refs(item) for item in obj]
+        return obj
+
+    # Replace all $refs in the schema
+    inlined_schema = replace_refs(schema)
+
+    # Remove the $defs section since we've inlined everything
+    if "$defs" in inlined_schema:
+        del inlined_schema["$defs"]
+
+    return inlined_schema
+
+
+def _normalize_schema(schema: dict | list, no_refs: bool = True) -> None:
     """
     Normalize schema, add additionalProperties: false and fix required fields
+
+    Args:
+        schema: The schema to normalize
+        no_refs: Whether to avoid $ref usage
     """
     if isinstance(schema, dict):
         if schema.get("type") == "object":
@@ -162,10 +215,11 @@ def _normalize_schema(schema: dict | list) -> None:
 
         # Recursively handle nested objects
         for value in schema.values():
-            if isinstance(value, (dict, list)):  # 修复：添加类型检查
-                _normalize_schema(value)
+            if isinstance(value, (dict, list)):
+                _normalize_schema(value, no_refs=no_refs)
 
     elif isinstance(schema, list):
         for item in schema:
-            if isinstance(item, (dict, list)):  # 修复：添加类型检查
-                _normalize_schema(item)
+            if isinstance(item, (dict, list)):
+                _normalize_schema(item, no_refs=no_refs)
+

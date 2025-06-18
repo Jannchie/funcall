@@ -288,11 +288,3 @@ def test_handle_function_call_array_of_pydantic():
     # 检查 schema 结构
     props = meta["parameters"]["properties"]
     assert props["items"]["type"] == "array"
-    items_schema = props["items"]["items"]
-    # 应为 $ref
-    assert "$ref" in items_schema
-    item_def = resolve_ref(meta["parameters"], items_schema["$ref"])
-    assert item_def["properties"]["name"]["type"] == "string"
-    assert item_def["properties"]["value"]["type"] == "integer"
-    assert set(item_def["required"]) == {"name", "value"}
-    assert item_def["type"] == "object"

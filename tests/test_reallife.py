@@ -99,6 +99,28 @@ def test_openai_funcall_list():
     assert 6 in results
 
 
+def test_openai_funcall_nested_list():
+    class Item(BaseModel):
+        name: str
+        value: int
+
+    def sum_nested_values(items: list[list[Item]]) -> int:
+        return sum(item.value for sublist in items for item in sublist)
+
+    fc = Funcall([sum_nested_values])
+    resp = openai.responses.create(
+        model="gpt-4.1-nano",
+        input="Sum the values of items: [[apple=1, banana=2], [cherry=3]], You should only call the function once.",
+        tools=fc.get_tools(),
+    )
+    results = []
+    for o in resp.output:
+        if isinstance(o, ResponseFunctionToolCall):
+            result = fc.handle_function_call(o)
+            results.append(result)
+    assert 6 in results
+
+
 # context 参数测试
 @dataclass
 class ContextState:
@@ -353,3 +375,60 @@ def test_greet_function_with_optional_type():
             result = fc.handle_function_call(o)
             results.append(result)
     assert "guest" in results[0]
+
+
+def test_openai_funcall_pydantic_nested():
+    class Inner(BaseModel):
+        value: int
+
+    class Middle(BaseModel):
+        inners: list[Inner]
+
+    class Outer(BaseModel):
+        middles: list[Middle]
+
+    def sum_all(outer: Outer) -> int:
+        return sum(inner.value for middle in outer.middles for inner in middle.inners)
+
+    fc = Funcall([sum_all])
+    resp = openai.responses.create(
+        model="gpt-4.1-nano",
+        input="Sum all values in: [[1,2],[3]]",
+        tools=fc.get_tools(),
+    )
+    results = []
+    for o in resp.output:
+        if isinstance(o, ResponseFunctionToolCall):
+            result = fc.handle_function_call(o)
+            results.append(result)
+    assert 6 in results
+
+
+def test_openai_funcall_dataclass_nested():
+    @dataclass
+    class Inner:
+        value: int
+
+    @dataclass
+    class Middle:
+        inners: list[Inner]
+
+    @dataclass
+    class Outer:
+        middles: list[Middle]
+
+    def sum_all(outer: Outer) -> int:
+        return sum(inner.value for middle in outer.middles for inner in middle.inners)
+
+    fc = Funcall([sum_all])
+    resp = openai.responses.create(
+        model="gpt-4.1-nano",
+        input="Sum all values in: [[4,5],[6]], only call the function once.",
+        tools=fc.get_tools(),
+    )
+    results = []
+    for o in resp.output:
+        if isinstance(o, ResponseFunctionToolCall):
+            result = fc.handle_function_call(o)
+            results.append(result)
+    assert 15 in results

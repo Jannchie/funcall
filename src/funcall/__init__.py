@@ -2,6 +2,7 @@ import contextlib
 import dataclasses
 import inspect
 import json
+import logging
 from collections.abc import Callable
 from logging import getLogger
 from typing import Generic, TypeVar, Union, get_args, get_type_hints
@@ -100,24 +101,29 @@ def generate_meta(func: Callable) -> FunctionToolParam:
 
 
 def _convert_arg(value: object, hint: type) -> object:
-    result = value
+    logging.debug(f"_convert_arg: value={value!r}, hint={hint}")
     origin = getattr(hint, "__origin__", None)
-    if origin is list or origin is set or origin is tuple:
+    if origin in (list, set, tuple):
         args = get_args(hint)
         item_type = args[0] if args else str
-        result = [_convert_arg(v, item_type) for v in value]
-    elif origin is dict:
-        result = value
-    elif getattr(hint, "__origin__", None) is Union:
-        # 只处理 Optional[X]，否则直接返回
+        return [_convert_arg(v, item_type) for v in value]
+    if origin is dict:
+        return value
+    if getattr(hint, "__origin__", None) is Union:
         args = get_args(hint)
         non_none = [a for a in args if a is not type(None)]
-        result = _convert_arg(value, non_none[0]) if len(non_none) == 1 else value
-    elif (isinstance(hint, type) and BaseModel and issubclass(hint, BaseModel)) or dataclasses.is_dataclass(hint):
-        result = hint(**value) if isinstance(value, dict) else value
-    else:
-        result = value
-    return result
+        return _convert_arg(value, non_none[0]) if len(non_none) == 1 else value
+    if isinstance(hint, type) and BaseModel and issubclass(hint, BaseModel):
+        if isinstance(value, dict):
+            fields = hint.model_fields
+            return hint(**{k: _convert_arg(v, fields[k].annotation) if k in fields else v for k, v in value.items()})
+        return value
+    if dataclasses.is_dataclass(hint):
+        if isinstance(value, dict):
+            field_types = {f.name: f.type for f in dataclasses.fields(hint)}
+            return hint(**{k: _convert_arg(v, field_types.get(k, type(v))) for k, v in value.items()})
+        return value
+    return value
 
 
 class Funcall:
@@ -137,9 +143,14 @@ class Funcall:
             sig = inspect.signature(func)
             type_hints = get_type_hints(func)
             kwargs = json.loads(args)
-            # 兼容单参数为数组时直接传数组
-            if isinstance(kwargs, list) and len(sig.parameters) == 1:
-                only_param = next(iter(sig.parameters))
+            # 找出所有非 context 参数
+            non_context_params = [
+                name for name in sig.parameters
+                if not (getattr(type_hints.get(name, str), "__origin__", None) is Context or type_hints.get(name, str) is Context)
+            ]
+            # 如果只有一个非 context 参数，且 kwargs 不是以该参数名为 key 的 dict，则包裹
+            if len(non_context_params) == 1 and (not isinstance(kwargs, dict) or set(kwargs.keys()) != set(non_context_params)):
+                only_param = non_context_params[0]
                 kwargs = {only_param: kwargs}
             new_kwargs = {}
             for name in sig.parameters:
@@ -148,14 +159,6 @@ class Funcall:
                     new_kwargs[name] = context
                 elif name in kwargs:
                     new_kwargs[name] = _convert_arg(kwargs[name], hint)
-                elif isinstance(hint, type) and BaseModel and issubclass(hint, BaseModel):
-                    # 支持 pydantic 单对象参数
-                    with contextlib.suppress(Exception):
-                        new_kwargs[name] = hint(**kwargs)
-                elif dataclasses.is_dataclass(hint):
-                    # 支持 dataclass 单对象参数
-                    with contextlib.suppress(Exception):
-                        new_kwargs[name] = hint(**kwargs)
             return func(**new_kwargs)
         msg = f"Function {item.name} not found"
         raise ValueError(msg)
