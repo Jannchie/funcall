@@ -68,7 +68,7 @@ def _add_field_descriptions(model: type, dataclass_type: type) -> None:
                 model.model_fields[field.name].description = description
 
 
-def to_field_type(param: type) -> type:
+def to_field_type(param: type) -> type:  # noqa: C901, PLR0911
     """
     Convert various type annotations to field types.
     """
@@ -119,7 +119,7 @@ def to_field_type(param: type) -> type:
     raise TypeError(msg)
 
 
-def params_to_schema(params: list[Any], no_refs: bool = True) -> dict[str, Any]:
+def params_to_schema(params: list[Any]) -> dict[str, Any]:
     """
     Read a parameter list, which can contain various types, dataclasses, pydantic models, basic types, even nested or nested in lists.
     Output a jsonschema describing this set of parameters.
@@ -144,16 +144,13 @@ def params_to_schema(params: list[Any], no_refs: bool = True) -> dict[str, Any]:
         model = create_model("ParamsModel", **model_fields)
 
     # Generate schema with explicit mode to avoid $refs
-    if no_refs:
-        schema = model.model_json_schema(mode="serialization")
-    else:
-        schema = model.model_json_schema()
+    schema = model.model_json_schema(mode="serialization")
 
     # Apply additional normalization
-    _normalize_schema(schema, no_refs=no_refs)
+    _normalize_schema(schema)
 
     # Remove $defs section if we want no refs
-    if no_refs and "$defs" in schema:
+    if "$defs" in schema:
         schema = _inline_definitions(schema)
 
     return schema
@@ -168,7 +165,7 @@ def _inline_definitions(schema: dict) -> dict:
 
     definitions = schema["$defs"]
 
-    def replace_refs(obj):
+    def replace_refs(obj: Any) -> Any:  # noqa: ANN401
         if isinstance(obj, dict):
             if "$ref" in obj:
                 # Extract definition name from $ref
@@ -189,22 +186,15 @@ def _inline_definitions(schema: dict) -> dict:
         return obj
 
     # Replace all $refs in the schema
-    inlined_schema = replace_refs(schema)
-
-    # Remove the $defs section since we've inlined everything
-    if "$defs" in inlined_schema:
-        del inlined_schema["$defs"]
-
-    return inlined_schema
+    return replace_refs(schema)
 
 
-def _normalize_schema(schema: dict | list, no_refs: bool = True) -> None:
+def _normalize_schema(schema: dict | list) -> None:
     """
     Normalize schema, add additionalProperties: false and fix required fields
 
     Args:
         schema: The schema to normalize
-        no_refs: Whether to avoid $ref usage
     """
     if isinstance(schema, dict):
         if schema.get("type") == "object":
@@ -216,10 +206,9 @@ def _normalize_schema(schema: dict | list, no_refs: bool = True) -> None:
         # Recursively handle nested objects
         for value in schema.values():
             if isinstance(value, (dict, list)):
-                _normalize_schema(value, no_refs=no_refs)
+                _normalize_schema(value)
 
     elif isinstance(schema, list):
         for item in schema:
             if isinstance(item, (dict, list)):
-                _normalize_schema(item, no_refs=no_refs)
-
+                _normalize_schema(item)

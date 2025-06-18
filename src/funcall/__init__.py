@@ -1,8 +1,6 @@
-import contextlib
 import dataclasses
 import inspect
 import json
-import logging
 from collections.abc import Callable
 from logging import getLogger
 from typing import Generic, TypeVar, Union, get_args, get_type_hints
@@ -101,7 +99,6 @@ def generate_meta(func: Callable) -> FunctionToolParam:
 
 
 def _convert_arg(value: object, hint: type) -> object:
-    logging.debug(f"_convert_arg: value={value!r}, hint={hint}")
     origin = getattr(hint, "__origin__", None)
     if origin in (list, set, tuple):
         args = get_args(hint)
@@ -144,10 +141,7 @@ class Funcall:
             type_hints = get_type_hints(func)
             kwargs = json.loads(args)
             # 找出所有非 context 参数
-            non_context_params = [
-                name for name in sig.parameters
-                if not (getattr(type_hints.get(name, str), "__origin__", None) is Context or type_hints.get(name, str) is Context)
-            ]
+            non_context_params = [name for name in sig.parameters if not (getattr(type_hints.get(name, str), "__origin__", None) is Context or type_hints.get(name, str) is Context)]
             # 如果只有一个非 context 参数，且 kwargs 不是以该参数名为 key 的 dict，则包裹
             if len(non_context_params) == 1 and (not isinstance(kwargs, dict) or set(kwargs.keys()) != set(non_context_params)):
                 only_param = non_context_params[0]
