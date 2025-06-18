@@ -1,5 +1,6 @@
 import dataclasses
 
+import pytest
 from pydantic import BaseModel
 
 from funcall.params_to_schema import params_to_schema
@@ -51,7 +52,5 @@ def test_params_to_schema_nested():
 
 
 def test_params_to_schema_dict():
-    schema = params_to_schema([dict[str, int]])
-    prop = schema["properties"]["param_0"]
-    assert prop["type"] == "object"
-    assert prop["additionalProperties"]["type"] == "integer"
+    with pytest.raises(TypeError, match="is not supported directly, use pydantic BaseModel or dataclass instead."):
+        params_to_schema([dict[str, int]])

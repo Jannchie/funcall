@@ -44,7 +44,8 @@ def _dataclass_to_pydantic_model(dataclass_type: type) -> type:
         if field.default is not dataclasses.MISSING:
             default_value = field.default
         elif field.default_factory is not dataclasses.MISSING:
-            default_value = field.default_factory()
+            # 修复：不要立即调用工厂函数，而是传递工厂函数本身
+            default_value = field.default_factory
         else:
             default_value = ...
 
@@ -69,50 +70,55 @@ def _add_field_descriptions(model: type, dataclass_type: type) -> None:
 
 
 def to_field_type(param: type) -> type:
+    """
+    Convert various type annotations to field types.
+    """
+    if param is None:
+        return type(None)
+
     origin = get_origin(param)
     args = get_args(param)
-    result = None
 
-    # Union/Optional (compatible with 3.10+ X | Y)
-    if origin is TypingUnion or (hasattr(types, "UnionType") and origin is types.UnionType):
-        union_types = tuple(to_field_type(a) for a in args)
-        result = _create_union_type(union_types)
+    # 修复：更清晰的类型检查顺序
+    # 首先检查是否是 Pydantic BaseModel
+    if isinstance(param, type) and issubclass(param, BaseModel):
+        return param
 
-    # List
-    elif origin is list:
-        item_type = to_field_type(args[0]) if args else TypingAny
-        result = list[item_type]
+    # 检查是否是 dataclass
+    if is_dataclass(param):
+        return _dataclass_to_pydantic_model(param)
 
-    # Dict
-    elif origin is dict:
-        if len(args) >= 2:
-            key_type = to_field_type(args[0])
-            value_type = to_field_type(args[1])
-            result = dict[key_type, value_type]
-        else:
-            result = dict[str, TypingAny]  # Default dict type
+    # 处理泛型类型
+    if origin is not None:
+        # Union/Optional (compatible with 3.10+ X | Y)
+        if origin is TypingUnion or (hasattr(types, "UnionType") and origin is types.UnionType):
+            union_types = tuple(to_field_type(a) for a in args)
+            return _create_union_type(union_types)
 
-    # Tuple
-    elif origin is tuple:
-        result = _handle_tuple_type(args)
+        # List
+        if origin is list:
+            item_type = to_field_type(args[0]) if args else TypingAny
+            return list[item_type]
 
-    # Pydantic BaseModel
-    elif isinstance(param, type) and issubclass(param, BaseModel):
-        result = param
+        # Dict - 提供更清晰的错误信息
+        if origin is dict:
+            msg = f"Dict type {param} is not supported directly, use pydantic BaseModel or dataclass instead."
+            raise TypeError(msg)
 
-    # Dataclass
-    elif is_dataclass(param):
-        result = _dataclass_to_pydantic_model(param)
+        # Tuple
+        if origin is tuple:
+            return _handle_tuple_type(args)
 
-    # Basic types
-    elif isinstance(param, type):
-        result = param
+    # 基本类型处理
+    if isinstance(param, type):
+        if param is dict:
+            msg = "Dict type is not supported directly, use pydantic BaseModel or dataclass instead."
+            raise TypeError(msg)
+        return param
 
-    else:
-        msg = f"Unsupported param type: {param}"
-        raise TypeError(msg)
-
-    return result
+    # 如果都不匹配，抛出错误
+    msg = f"Unsupported param type: {param} (type: {type(param)})"
+    raise TypeError(msg)
 
 
 def params_to_schema(params: list[Any]) -> dict[str, Any]:
@@ -120,13 +126,23 @@ def params_to_schema(params: list[Any]) -> dict[str, Any]:
     Read a parameter list, which can contain various types, dataclasses, pydantic models, basic types, even nested or nested in lists.
     Output a jsonschema describing this set of parameters.
     """
+    # 修复：添加输入验证
+    if not isinstance(params, list):
+        raise TypeError("params must be a list")
 
     # Build parameter model
     if not params:
         # Handle the case of an empty parameter list
         model = create_model("ParamsModel")
     else:
-        model_fields = {f"param_{i}": (to_field_type(p), ...) for i, p in enumerate(params)}
+        model_fields = {}
+        for i, p in enumerate(params):
+            try:
+                field_type = to_field_type(p)
+                model_fields[f"param_{i}"] = (field_type, ...)
+            except Exception as e:
+                raise TypeError(f"Error processing parameter {i} ({p}): {e}") from e
+
         model = create_model("ParamsModel", **model_fields)
 
     schema = model.model_json_schema()
@@ -148,8 +164,10 @@ def _normalize_schema(schema: dict | list) -> None:
 
         # Recursively handle nested objects
         for value in schema.values():
-            _normalize_schema(value)
+            if isinstance(value, (dict, list)):  # 修复：添加类型检查
+                _normalize_schema(value)
 
     elif isinstance(schema, list):
         for item in schema:
-            _normalize_schema(item)
+            if isinstance(item, (dict, list)):  # 修复：添加类型检查
+                _normalize_schema(item)

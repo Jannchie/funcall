@@ -230,11 +230,13 @@ class UserInfo:
     name: str
     age: int | None = None
 
+
 def test_openai_funcall_dataclass_optional():
     def get_user_age(user: UserInfo) -> str:
         if user.age is not None:
             return f"{user.name} is {user.age} years old."
         return f"{user.name}'s age is unknown."
+
     fc = Funcall([get_user_age])
     print(fc.get_tools())
     resp = openai.responses.create(
@@ -256,11 +258,13 @@ class Product(BaseModel):
     price: float
     description: str | None = None
 
+
 def test_openai_funcall_pydantic_optional():
     def get_product_desc(product: Product) -> str:
         if product.description:
             return f"{product.name}: {product.description}"
         return f"{product.name} has no description."
+
     fc = Funcall([get_product_desc])
     resp = openai.responses.create(
         model="gpt-4.1-nano",
@@ -273,3 +277,79 @@ def test_openai_funcall_pydantic_optional():
             result = fc.handle_function_call(o)
             results.append(result)
     assert "no description" in results[0]
+
+
+def test_openai_funcall_union_param():
+    def echo(x: int | str) -> str:
+        return str(x)
+
+    fc = Funcall([echo])
+    resp = openai.responses.create(
+        model="gpt-4.1-nano",
+        input="Use function call to echo 123",
+        tools=fc.get_tools(),
+    )
+    results = []
+    for o in resp.output:
+        if isinstance(o, ResponseFunctionToolCall):
+            result = fc.handle_function_call(o)
+            results.append(result)
+    assert "123" in results
+
+
+def test_openai_funcall_union_type():
+    def echo(x: Union[int, str]) -> str:  # noqa: UP007
+        return str(x)
+
+    fc = Funcall([echo])
+    resp = openai.responses.create(
+        model="gpt-4.1-nano",
+        input="Use function call to echo 123",
+        tools=fc.get_tools(),
+    )
+    results = []
+    for o in resp.output:
+        if isinstance(o, ResponseFunctionToolCall):
+            result = fc.handle_function_call(o)
+            results.append(result)
+    assert "123" in results
+
+
+def test_openai_funcall_optional_param():
+    def greet(name: str | None = None) -> str:
+        if name:
+            return f"Hello, {name}!"
+        return "Hello, guest!"
+
+    fc = Funcall([greet])
+    resp = openai.responses.create(
+        model="gpt-4.1-nano",
+        input="Use function call to greet without a name",
+        tools=fc.get_tools(),
+    )
+    results = []
+    for o in resp.output:
+        if isinstance(o, ResponseFunctionToolCall):
+            result = fc.handle_function_call(o)
+            results.append(result)
+    assert "guest" in results[0]
+
+
+def test_greet_function_with_optional_type():
+    def greet(name: Optional[str] = None) -> str:  # noqa: UP045
+        if name:
+            return f"Hello, {name}!"
+        return "Hello, guest!"
+
+    fc = Funcall([greet])
+    resp = openai.responses.create(
+        model="gpt-4.1-nano",
+        input="Use function call to greet without a name",
+        tools=fc.get_tools(),
+    )
+    results = []
+    for o in resp.output:
+        if isinstance(o, ResponseFunctionToolCall):
+            result = fc.handle_function_call(o)
+            results.append(result)
+    assert "guest" in results[0]

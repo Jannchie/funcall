@@ -96,15 +96,21 @@ def test_generate_meta_param_type_builtin_types():
 
 
 def test_generate_meta_param_type_list_and_dict():
-    def foo(a: list[int], b: list[str], c: dict, d: dict[str, int]) -> None:
+    def foo(a: list[int], b: list[str]) -> None:
         pass
 
     meta = generate_meta(foo)
     props = meta["parameters"]["properties"]
     assert props["a"]["type"] == "array"
     assert props["b"]["type"] == "array"
-    assert props["c"]["type"] == "object"
-    assert props["d"]["type"] == "object"
+
+
+def test_dict_raise_error():
+    def foo(a: dict[str, int]) -> None:
+        pass
+
+    with pytest.raises(TypeError, match="is not supported directly, use pydantic BaseModel or dataclass instead."):
+        generate_meta(foo)
 
 
 def test_get_tools():

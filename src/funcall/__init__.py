@@ -72,8 +72,8 @@ def generate_meta(func: Callable) -> FunctionToolParam:
                 },
                 "strict": True,
             }
-            if "$defs" in schema:
-                meta["parameters"]["$defs"] = schema["$defs"]
+            # if "$defs" in schema:
+            #     meta["parameters"]["$defs"] = schema["$defs"]
             return meta
     # 多参数或非 dataclass/BaseModel
     properties = {}
