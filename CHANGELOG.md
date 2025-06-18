@@ -1,3 +1,11 @@
+## v0.5.0
+
+[v0.4.0...v0.5.0](https://github.com/Jannchie/funcall/compare/v0.4.0...v0.5.0)
+
+### :rocket: Breaking Changes
+
+- **funcall**: rewrite funcall for clarity and extensibility - By [Jianqi Pan](mailto:jannchie@gmail.com) in [fd87cb6](https://github.com/Jannchie/funcall/commit/fd87cb6)
+
 ## v0.4.0
 
 [v0.3.0...v0.4.0](https://github.com/Jannchie/funcall/compare/v0.3.0...v0.4.0)
