@@ -62,6 +62,7 @@ async def test_litellm_funcall_with_async_tool():
         model="gpt-4.1",
         messages=[{"role": "user", "content": "Use function call to calculate the sum of 114 and 514"}],
         tools=tools,
+        tool_choice={"type": "function", "function": {"name": "async_add"}},
     )
     results = []
     choice = resp.choices[0]

@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Union
 
 import openai
+import pytest
 from openai.types.responses import ResponseFunctionToolCall
 from pydantic import BaseModel, Field
 
@@ -23,6 +24,27 @@ def test_openai_funcall_sum():
     for o in resp.output:
         if isinstance(o, ResponseFunctionToolCall):
             result = fc.handle_function_call(o)
+            results.append(result)
+    assert 628 in results
+
+
+@pytest.mark.asyncio
+async def test_openai_funcall_sum_tool_choice():
+    async def add(a: float, b: float) -> float:
+        """Calculate the sum of two numbers"""
+        return a + b
+
+    fc = Funcall([add])
+    resp = openai.responses.create(
+        model="gpt-4.1-nano",
+        input="Use function call to calculate the sum of 114 and 514",
+        tools=fc.get_tools(),
+        tool_choice={"type": "function", "name": "add"},
+    )
+    results = []
+    for o in resp.output:
+        if isinstance(o, ResponseFunctionToolCall):
+            result = await fc.handle_function_call_async(o)
             results.append(result)
     assert 628 in results
 
