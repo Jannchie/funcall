@@ -1,3 +1,21 @@
+## v0.4.0
+
+[v0.3.0...v0.4.0](https://github.com/Jannchie/funcall/compare/v0.3.0...v0.4.0)
+
+### :rocket: Breaking Changes
+
+- **schema**: simplify params_to_schema signature and remove unused no_refs parameter - By [Jianqi Pan](mailto:jannchie@gmail.com) in [f5055a2](https://github.com/Jannchie/funcall/commit/f5055a2)
+
+### :sparkles: Features
+
+- **funcall**: add async support for function call handling - By [Jianqi Pan](mailto:jannchie@gmail.com) in [d0aa612](https://github.com/Jannchie/funcall/commit/d0aa612)
+- **funcall**: add litellm support for function call handling - By [Jianqi Pan](mailto:jannchie@gmail.com) in [5fa1c33](https://github.com/Jannchie/funcall/commit/5fa1c33)
+- **schema**: support inline schema without $refs - By [Jianqi Pan](mailto:jannchie@gmail.com) in [0e09282](https://github.com/Jannchie/funcall/commit/0e09282)
+
+### :art: Refactors
+
+- **params-to-schema**: remove redundant exception handling - By [Jianqi Pan](mailto:jannchie@gmail.com) in [8f8139d](https://github.com/Jannchie/funcall/commit/8f8139d)
+
 ## v0.3.0
 
 [v0.2.0...v0.3.0](https://github.com/Jannchie/funcall/compare/v0.2.0...v0.3.0)
