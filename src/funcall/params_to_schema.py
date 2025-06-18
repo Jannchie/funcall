@@ -128,7 +128,8 @@ def params_to_schema(params: list[Any]) -> dict[str, Any]:
     """
     # 修复：添加输入验证
     if not isinstance(params, list):
-        raise TypeError("params must be a list")
+        msg = "params must be a list"
+        raise TypeError(msg)
 
     # Build parameter model
     if not params:
@@ -137,11 +138,8 @@ def params_to_schema(params: list[Any]) -> dict[str, Any]:
     else:
         model_fields = {}
         for i, p in enumerate(params):
-            try:
-                field_type = to_field_type(p)
-                model_fields[f"param_{i}"] = (field_type, ...)
-            except Exception as e:
-                raise TypeError(f"Error processing parameter {i} ({p}): {e}") from e
+            field_type = to_field_type(p)
+            model_fields[f"param_{i}"] = (field_type, ...)
 
         model = create_model("ParamsModel", **model_fields)
 
