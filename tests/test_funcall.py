@@ -137,6 +137,17 @@ def test_handle_function_call_normal():
     assert result == 3
 
 
+def test_handle_function_call_normal_async():
+    async def add(a: int, b: int) -> int:
+        return a + b
+
+    fc = Funcall([add])
+    item = get_dummy_response_function_tool_call("add", json.dumps({"a": 1, "b": 2}))
+    with patch("funcall.__init__.ResponseFunctionToolCall", get_dummy_response_function_tool_call):
+        result = fc.handle_function_call(item)
+    assert result == 3
+
+
 def test_no_function_call():
     fc = Funcall()
     assert fc.get_tools() == []
