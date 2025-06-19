@@ -1,3 +1,15 @@
+## v0.6.0
+
+[v0.5.0...v0.6.0](https://github.com/Jannchie/funcall/compare/v0.5.0...v0.6.0)
+
+### :rocket: Breaking Changes
+
+- **funcall**: modularize and reorganize core logic - By [Jianqi Pan](mailto:jannchie@gmail.com) in [7501399](https://github.com/Jannchie/funcall/commit/7501399)
+
+### :sparkles: Features
+
+- **funcall**: add call_function and async variants && improve litellm required field handling && add examples and tests - By [Jianqi Pan](mailto:jannchie@gmail.com) in [b7bf0da](https://github.com/Jannchie/funcall/commit/b7bf0da)
+
 ## v0.5.0
 
 [v0.4.0...v0.5.0](https://github.com/Jannchie/funcall/compare/v0.4.0...v0.5.0)
