@@ -4,13 +4,13 @@ from funcall import Funcall
 
 
 # Define the function to be called
-def get_whether(city: str) -> float:
+def get_weather(city: str) -> float:
     """Get the weather for a specific city."""
-    return "Sunny"  # Simulating a weather response
+    return f"The weather in {city} is sunny."  # Simulated response
 
 
 # Use Funcall to manage function
-fc = Funcall([get_whether])
+fc = Funcall([get_weather])
 
 
 resp = litellm.completion(
@@ -20,8 +20,8 @@ resp = litellm.completion(
             "role": "user",
             "content": "What is the weather like in Boston?",
         },
-        {"role": "assistant", "content": None, "function_call": {"name": "get_whether", "arguments": '{ "city": "Boston, MA"}'}},
-        {"role": "function", "name": "get_whether", "content": "Sunny"},
+        {"role": "assistant", "content": None, "function_call": {"name": "get_weather", "arguments": '{ "city": "Boston, MA"}'}},
+        {"role": "function", "name": "get_weather", "content": "Sunny"},
     ],
     tools=fc.get_tools(target="litellm"),  # Get the function metadata
 )

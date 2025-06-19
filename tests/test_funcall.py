@@ -132,7 +132,7 @@ def test_handle_function_call_normal():
 
     fc = Funcall([add])
     item = get_dummy_response_function_tool_call("add", json.dumps({"a": 1, "b": 2}))
-    with patch("funcall.__init__.ResponseFunctionToolCall", get_dummy_response_function_tool_call):
+    with patch("litellm.ResponseFunctionToolCall", get_dummy_response_function_tool_call):
         result = fc.handle_function_call(item)
     assert result == 3
 
@@ -143,7 +143,7 @@ def test_handle_function_call_normal_async():
 
     fc = Funcall([add])
     item = get_dummy_response_function_tool_call("add", json.dumps({"a": 1, "b": 2}))
-    with patch("funcall.__init__.ResponseFunctionToolCall", get_dummy_response_function_tool_call):
+    with patch("litellm.ResponseFunctionToolCall", get_dummy_response_function_tool_call):
         result = fc.handle_function_call(item)
     assert result == 3
 
@@ -198,7 +198,7 @@ def test_generate_meta_param_type_dataclass():
     meta = generate_meta(foo)
     fc = Funcall([foo])
     item = get_dummy_response_function_tool_call("foo", json.dumps({"a": 1, "b": "test"}))
-    with patch("funcall.__init__.ResponseFunctionToolCall", get_dummy_response_function_tool_call):
+    with patch("litellm.ResponseFunctionToolCall", get_dummy_response_function_tool_call):
         fc.handle_function_call(item)
     props = meta["parameters"]["properties"]
     assert "a" in props
