@@ -1,7 +1,7 @@
 import dataclasses
 import types
 from dataclasses import fields, is_dataclass
-from typing import Any, get_args, get_origin
+from typing import Any, Literal, get_args, get_origin
 from typing import Any as TypingAny
 from typing import Union as TypingUnion
 
@@ -119,14 +119,14 @@ def to_field_type(param: type) -> type:  # noqa: C901, PLR0911
     raise TypeError(msg)
 
 
-def params_to_schema(params: list[Any]) -> dict[str, Any]:
+def params_to_schema(params: list[Any], target: Literal["openai", "litellm"] = "openai") -> dict[str, Any]:
     """
     Read a parameter list, which can contain various types, dataclasses, pydantic models, basic types, even nested or nested in lists.
     Output a jsonschema describing this set of parameters.
 
     Args:
         params: List of parameter types
-        no_refs: If True, inline all definitions instead of using $ref (default: True)
+        target: Target platform ("openai" or "litellm"), defaults to "openai"
     """
     if not isinstance(params, list):
         msg = "params must be a list"
@@ -146,8 +146,9 @@ def params_to_schema(params: list[Any]) -> dict[str, Any]:
     # Generate schema with explicit mode to avoid $refs
     schema = model.model_json_schema(mode="serialization")
 
-    # Apply additional normalization
-    _normalize_schema(schema)
+    # Apply normalization only for OpenAI target
+    if target == "openai":
+        _normalize_schema(schema)
 
     # Remove $defs section if we want no refs
     if "$defs" in schema:
@@ -191,7 +192,7 @@ def _inline_definitions(schema: dict) -> dict:
 
 def _normalize_schema(schema: dict | list) -> None:
     """
-    Normalize schema, add additionalProperties: false and fix required fields
+    Normalize schema for OpenAI, add additionalProperties: false and fix required fields
 
     Args:
         schema: The schema to normalize

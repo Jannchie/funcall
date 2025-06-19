@@ -115,6 +115,15 @@ def _is_context_type(hint: type) -> bool:
     return getattr(hint, "__origin__", None) is Context or hint is Context
 
 
+def _is_optional_type(hint: type) -> bool:
+    """判断类型是否为 Optional/Union[..., None]"""
+    origin = getattr(hint, "__origin__", None)
+    if origin is Union:
+        args = get_args(hint)
+        return any(a is type(None) for a in args)
+    return False
+
+
 def _generate_single_param_metadata(
     func: Callable,
     param_type: type,
@@ -138,6 +147,26 @@ def _generate_single_param_metadata(
     }
 
     if target == "litellm":
+        model_fields = None
+        if BaseModel and issubclass(param_type, BaseModel):
+            model_fields = param_type.model_fields
+        elif dataclasses.is_dataclass(param_type):
+            model_fields = {f.name: f for f in dataclasses.fields(param_type)}
+        litellm_required = []
+        for k in properties:
+            # 优先用 pydantic/dc 字段信息判断
+            is_optional = False
+            if model_fields and k in model_fields:
+                if BaseModel and issubclass(param_type, BaseModel):
+                    ann = model_fields[k].annotation
+                    is_optional = _is_optional_type(ann) or model_fields[k].is_required is False
+                else:
+                    ann = model_fields[k].type
+                    is_optional = _is_optional_type(ann) or (getattr(model_fields[k], "default", dataclasses.MISSING) is not dataclasses.MISSING)
+            else:
+                is_optional = k not in required
+            if not is_optional:
+                litellm_required.append(k)
         return {
             "type": "function",
             "function": {
@@ -145,7 +174,7 @@ def _generate_single_param_metadata(
                 "description": description,
                 "parameters": {
                     **base_params,
-                    "required": list(properties.keys()) if required else [],
+                    "required": litellm_required,
                 },
             },
         }
@@ -183,6 +212,15 @@ def _generate_multi_param_metadata(
     }
 
     if target == "litellm":
+        sig = inspect.signature(func)
+        type_hints = get_type_hints(func)
+        litellm_required = []
+        for name in param_names:
+            hint = type_hints.get(name, str)
+            param = sig.parameters[name]
+            is_optional = _is_optional_type(hint) or (param.default != inspect.Parameter.empty)
+            if not is_optional:
+                litellm_required.append(name)
         return {
             "type": "function",
             "function": {
@@ -190,7 +228,7 @@ def _generate_multi_param_metadata(
                 "description": description,
                 "parameters": {
                     **base_params,
-                    "required": list(properties.keys()),
+                    "required": litellm_required,
                 },
             },
         }
@@ -206,9 +244,6 @@ def _generate_multi_param_metadata(
         },
         "strict": True,
     }
-
-    if "$defs" in schema:
-        metadata["parameters"]["$defs"] = schema["$defs"]
 
     return metadata
 
@@ -338,13 +373,75 @@ class Funcall:
             if loop.is_running():
                 # If already in event loop, use thread pool
                 with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, func(**kwargs))
+                    future = executor.submit(func, **kwargs)
                     return future.result()
             else:
                 return loop.run_until_complete(func(**kwargs))
         except RuntimeError:
             # No event loop exists, create new one
             return asyncio.run(func(**kwargs))
+
+    def call_function(
+        self,
+        name: str,
+        arguments: str,
+        context: object = None,
+    ) -> object:
+        """
+        Call a function by name with JSON arguments synchronously.
+
+        Args:
+            name: Name of the function to call
+            arguments: JSON string of function arguments
+            context: Context object to inject (optional)
+
+        Returns:
+            Function execution result
+
+        Raises:
+            ValueError: If function is not found
+            json.JSONDecodeError: If arguments are not valid JSON
+        """
+        func, kwargs = self._prepare_function_execution(name, arguments, context)
+
+        if _is_async_function(func):
+            logger.warning(
+                "Function %s is async but being called synchronously. Consider using call_function_async.",
+                name,
+            )
+            return self._execute_sync_in_async_context(func, kwargs)
+
+        return func(**kwargs)
+
+    async def call_function_async(
+        self,
+        name: str,
+        arguments: str,
+        context: object = None,
+    ) -> object:
+        """
+        Call a function by name with JSON arguments asynchronously.
+
+        Args:
+            name: Name of the function to call
+            arguments: JSON string of function arguments
+            context: Context object to inject (optional)
+
+        Returns:
+            Function execution result
+
+        Raises:
+            ValueError: If function is not found
+            json.JSONDecodeError: If arguments are not valid JSON
+        """
+        func, kwargs = self._prepare_function_execution(name, arguments, context)
+
+        if _is_async_function(func):
+            return await func(**kwargs)
+
+        # Run sync function in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: func(**kwargs))
 
     def handle_openai_function_call(
         self,
@@ -365,16 +462,7 @@ class Funcall:
             msg = "call must be an instance of ResponseFunctionToolCall"
             raise TypeError(msg)
 
-        func, kwargs = self._prepare_function_execution(call.name, call.arguments, context)
-
-        if _is_async_function(func):
-            logger.warning(
-                "Function %s is async but being called synchronously. Consider using handle_openai_function_call_async.",
-                call.name,
-            )
-            return self._execute_sync_in_async_context(func, kwargs)
-
-        return func(**kwargs)
+        return self.call_function(call.name, call.arguments, context)
 
     async def handle_openai_function_call_async(
         self,
@@ -391,15 +479,11 @@ class Funcall:
         Returns:
             Function execution result
         """
+        if not isinstance(call, ResponseFunctionToolCall):
+            msg = "call must be an instance of ResponseFunctionToolCall"
+            raise TypeError(msg)
 
-        func, kwargs = self._prepare_function_execution(call.name, call.arguments, context)
-
-        if _is_async_function(func):
-            return await func(**kwargs)
-
-        # Run sync function in thread pool to avoid blocking event loop
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: func(**kwargs))
+        return await self.call_function_async(call.name, call.arguments, context)
 
     def handle_litellm_function_call(
         self,
@@ -416,20 +500,15 @@ class Funcall:
         Returns:
             Function execution result
         """
-        func, kwargs = self._prepare_function_execution(
+        if not isinstance(call, litellm.ChatCompletionMessageToolCall):
+            msg = "call must be an instance of litellm.ChatCompletionMessageToolCall"
+            raise TypeError(msg)
+
+        return self.call_function(
             call.function.name,
             call.function.arguments,
             context,
         )
-
-        if _is_async_function(func):
-            logger.warning(
-                "Function %s is async but being called synchronously. Consider using handle_litellm_function_call_async.",
-                call.function.name,
-            )
-            return self._execute_sync_in_async_context(func, kwargs)
-
-        return func(**kwargs)
 
     async def handle_litellm_function_call_async(
         self,
@@ -450,18 +529,11 @@ class Funcall:
             msg = "call must be an instance of litellm.ChatCompletionMessageToolCall"
             raise TypeError(msg)
 
-        func, kwargs = self._prepare_function_execution(
+        return await self.call_function_async(
             call.function.name,
             call.function.arguments,
             context,
         )
-
-        if _is_async_function(func):
-            return await func(**kwargs)
-
-        # Run sync function in thread pool to avoid blocking event loop
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: func(**kwargs))
 
     def handle_function_call(
         self,
@@ -506,6 +578,10 @@ class Funcall:
             return await self.handle_litellm_function_call_async(call, context)
         msg = "call must be an instance of ResponseFunctionToolCall or litellm.ChatCompletionMessageToolCall"
         raise TypeError(msg)
+
+
+# 兼容旧接口
+generate_meta = generate_function_metadata
 
 
 __all__ = ["Context", "Funcall", "generate_function_metadata"]

@@ -209,6 +209,26 @@ def test_openai_funcall_optional():
     assert "guest" in results[0]
 
 
+def test_openai_funcall_optional_2():
+    def greet(name: str | None = None) -> str:
+        if name:
+            return f"Hello, {name}!"
+        return "Hello, guest!"
+
+    fc = Funcall([greet])
+    resp = openai.responses.create(
+        model="gpt-4.1-nano",
+        input="Use function call to greet without a name",
+        tools=fc.get_tools(),
+    )
+    results = []
+    for o in resp.output:
+        if isinstance(o, ResponseFunctionToolCall):
+            result = fc.handle_function_call(o)
+            results.append(result)
+    assert "guest" in results[0]
+
+
 def test_openai_funcall_empty():
     def ping() -> str:
         return "pong"
