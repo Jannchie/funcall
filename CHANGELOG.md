@@ -1,3 +1,19 @@
+## v0.7.0
+
+[v0.6.0...v0.7.0](https://github.com/Jannchie/funcall/compare/v0.6.0...v0.7.0)
+
+### :sparkles: Features
+
+- **decorators**: add tool decorator and ToolWrapper class - By [Jianqi Pan](mailto:jannchie@gmail.com) in [3b4ea44](https://github.com/Jannchie/funcall/commit/3b4ea44)
+
+### :adhesive_bandage: Fixes
+
+- **typing**: add type ignore for union and tool choice - By [Jianqi Pan](mailto:jannchie@gmail.com) in [b6df111](https://github.com/Jannchie/funcall/commit/b6df111)
+
+### :memo: Documentation
+
+- **project**: update project description in pyproject.toml - By [Jianqi Pan](mailto:jannchie@gmail.com) in [968736f](https://github.com/Jannchie/funcall/commit/968736f)
+
 ## v0.6.0
 
 [v0.5.0...v0.6.0](https://github.com/Jannchie/funcall/compare/v0.5.0...v0.6.0)
