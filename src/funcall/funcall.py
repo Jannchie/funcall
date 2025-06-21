@@ -13,12 +13,13 @@ from openai.types.responses import (
 )
 from pydantic import BaseModel
 
-from funcall.types import is_context_type
+from funcall.decorators import ToolWrapper
+from funcall.types import ToolMeta, is_context_type
 
 from .metadata import generate_function_metadata
 
 
-def _convert_argument_type(value: object, hint: type) -> object:
+def _convert_argument_type(value: list, hint: type) -> object:
     """
     Convert argument values to match expected types.
 
@@ -44,7 +45,7 @@ def _convert_argument_type(value: object, hint: type) -> object:
     elif isinstance(hint, type) and BaseModel and issubclass(hint, BaseModel):
         if isinstance(value, dict):
             fields = hint.model_fields
-            converted_data = {k: _convert_argument_type(v, fields[k].annotation) if k in fields else v for k, v in value.items()}
+            converted_data = {k: _convert_argument_type(v, fields[k].annotation) if k in fields else v for k, v in value.items()}  # type: ignore
             result = hint(**converted_data)
         else:
             result = value
@@ -89,7 +90,7 @@ class Funcall:
         Returns:
             List of function tool parameters
         """
-        return [generate_function_metadata(func, target) for func in self.functions]
+        return [generate_function_metadata(func, target) for func in self.functions]  # type: ignore
 
     def _prepare_function_execution(
         self,
@@ -132,7 +133,7 @@ class Funcall:
             if is_context_type(hint):
                 prepared_kwargs[param_name] = context
             elif param_name in arguments:
-                prepared_kwargs[param_name] = _convert_argument_type(arguments[param_name], hint)
+                prepared_kwargs[param_name] = _convert_argument_type(arguments[param_name], hint)  # type: ignore
 
         return func, prepared_kwargs
 
@@ -174,6 +175,15 @@ class Funcall:
         """
         func, kwargs = self._prepare_function_execution(name, arguments, context)
 
+        if isinstance(func, ToolWrapper):
+            if func.is_async:
+                logger.warning(
+                    "Function %s is async but being called synchronously. Consider using call_function_async.",
+                    name,
+                )
+                return self._execute_sync_in_async_context(func, kwargs)
+            return func(**kwargs)
+
         if _is_async_function(func):
             logger.warning(
                 "Function %s is async but being called synchronously. Consider using call_function_async.",
@@ -205,6 +215,12 @@ class Funcall:
             json.JSONDecodeError: If arguments are not valid JSON
         """
         func, kwargs = self._prepare_function_execution(name, arguments, context)
+        if isinstance(func, ToolWrapper):
+            if func.is_async:
+                return await func.acall(**kwargs)
+            # Run sync function in thread pool to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, lambda: func(**kwargs))
 
         if _is_async_function(func):
             return await func(**kwargs)
@@ -273,7 +289,12 @@ class Funcall:
         if not isinstance(call, litellm.ChatCompletionMessageToolCall):
             msg = "call must be an instance of litellm.ChatCompletionMessageToolCall"
             raise TypeError(msg)
-
+        if not call.function:
+            msg = "call.function must not be None"
+            raise ValueError(msg)
+        if not call.function.name:
+            msg = "call.function.name must not be empty"
+            raise ValueError(msg)
         return self.call_function(
             call.function.name,
             call.function.arguments,
@@ -298,7 +319,12 @@ class Funcall:
         if not isinstance(call, litellm.ChatCompletionMessageToolCall):
             msg = "call must be an instance of litellm.ChatCompletionMessageToolCall"
             raise TypeError(msg)
-
+        if not call.function:
+            msg = "call.function must not be None"
+            raise ValueError(msg)
+        if not call.function.name:
+            msg = "call.function.name must not be empty"
+            raise ValueError(msg)
         return await self.call_function_async(
             call.function.name,
             call.function.arguments,
@@ -348,3 +374,28 @@ class Funcall:
             return await self.handle_litellm_function_call_async(call, context)
         msg = "call must be an instance of ResponseFunctionToolCall or litellm.ChatCompletionMessageToolCall"
         raise TypeError(msg)
+
+    def get_tool_meta(self, name: str) -> ToolMeta:
+        """
+        Get metadata for a registered function by name.
+
+        Args:
+            name: Name of the function
+
+        Returns:
+            Function metadata dictionary
+        """
+        if name not in self.function_registry:
+            msg = f"Function {name} not found"
+            raise ValueError(msg)
+
+        func = self.function_registry[name]
+        if isinstance(func, ToolWrapper):
+            return ToolMeta(
+                require_confirm=func.require_confirm,
+                return_direct=func.return_direct,
+            )
+        return ToolMeta(
+            require_confirm=False,
+            return_direct=False,
+        )

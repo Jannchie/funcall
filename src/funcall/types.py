@@ -27,6 +27,10 @@ class LiteLLMFunctionToolParam(TypedDict):
     function: Required[LiteLLMFunctionSpec]
 
 
+class ToolMeta(TypedDict):
+    require_confirm: bool
+    return_direct: bool
+
 
 def is_context_type(hint: type) -> bool:
     return getattr(hint, "__origin__", None) is Context or hint is Context
