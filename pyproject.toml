@@ -1,7 +1,7 @@
 [project]
 name = "funcall"
 version = "0.6.0"
-description = "Add your description here"
+description = "A toolkit for function calling, tool registration, and LiteLLM & OpenAI compatible tool integration with sync/async support."
 readme = "README.md"
 authors = [{ name = "Jianqi Pan", email = "jannchie@gmail.com" }]
 requires-python = ">=3.10"
