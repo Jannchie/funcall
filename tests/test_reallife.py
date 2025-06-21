@@ -151,6 +151,9 @@ class ContextState:
 
 def test_openai_funcall_context():
     def get_user_id(ctx: Context[ContextState]) -> int:
+        if not ctx.value or not ctx.value.user_id:
+            msg = "User ID not found in context"
+            raise ValueError(msg)
         return ctx.value.user_id
 
     fc = Funcall([get_user_id])

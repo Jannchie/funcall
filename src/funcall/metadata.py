@@ -111,11 +111,11 @@ def _generate_single_param_metadata(
             is_optional = False
             if model_fields and k in model_fields:
                 if BaseModel and issubclass(param_type, BaseModel):
-                    ann = model_fields[k].annotation
-                    is_optional = is_optional_type(ann) or model_fields[k].is_required is False
+                    ann = model_fields[k].annotation  # type: ignore
+                    is_optional = is_optional_type(ann) or model_fields[k].is_required is False  # type: ignore
                 else:
-                    ann = model_fields[k].type
-                    is_optional = is_optional_type(ann) or (getattr(model_fields[k], "default", dataclasses.MISSING) is not dataclasses.MISSING)
+                    ann = model_fields[k].type  # type: ignore
+                    is_optional = is_optional_type(ann) or (getattr(model_fields[k], "default", dataclasses.MISSING) is not dataclasses.MISSING)  # type: ignore
             else:
                 is_optional = k not in required
             if not is_optional:
@@ -130,7 +130,7 @@ def _generate_single_param_metadata(
                     "required": litellm_required,
                 },
             },
-        }
+        }  # type: ignore
 
     # OpenAI format
     metadata: FunctionToolParam = {
@@ -184,7 +184,7 @@ def _generate_multi_param_metadata(
                     "required": litellm_required,
                 },
             },
-        }
+        }  # type: ignore
 
     # OpenAI format
     metadata: FunctionToolParam = {

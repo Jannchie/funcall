@@ -8,12 +8,12 @@ from typing import Union as TypingUnion
 from pydantic import BaseModel, create_model
 
 
-def _create_union_type(union_types: tuple) -> type:
+def _create_union_type(union_types: tuple) -> object:
     """Create a Union type, handling compatibility issues"""
     try:
         return TypingUnion[union_types]  # noqa: UP007
     except TypeError:
-        return TypingUnion.__getitem__(union_types)
+        return TypingUnion.__getitem__(union_types)  # type: ignore
 
 
 def _handle_tuple_type(args: tuple) -> type:
@@ -91,7 +91,7 @@ def to_field_type(param: type) -> type:  # noqa: C901, PLR0911
         # Union/Optional (compatible with 3.10+ X | Y)
         if origin is TypingUnion or (hasattr(types, "UnionType") and origin is types.UnionType):
             union_types = tuple(to_field_type(a) for a in args)
-            return _create_union_type(union_types)
+            return _create_union_type(union_types)  # type: ignore
 
         # List
         if origin is list:
