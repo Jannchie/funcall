@@ -17,7 +17,7 @@ def add(data: AddForm) -> float:
 
 def test_litellm_funcall_sum():
     fc = Funcall([add])
-    tools = fc.get_tools(target="litellm")
+    tools = fc.get_tools(target="completion")
     resp = litellm.completion(
         model="gpt-4.1",
         messages=[{"role": "user", "content": "Use function call to calculate the sum of 114 and 514"}],
@@ -38,7 +38,7 @@ def test_litellm_funcall_sum_simple():
         return a + b
 
     fc = Funcall([add])
-    tools = fc.get_tools(target="litellm")
+    tools = fc.get_tools(target="completion")
     resp = litellm.completion(
         model="gpt-4.1",
         messages=[{"role": "user", "content": "Use function call to calculate the sum of 114 and 514"}],
@@ -56,7 +56,7 @@ def test_litellm_funcall_sum_simple():
 @pytest.mark.asyncio
 async def test_litellm_funcall_async():
     fc = Funcall([add])
-    tools = fc.get_tools(target="litellm")
+    tools = fc.get_tools(target="completion")
     resp = await litellm.acompletion(
         model="gpt-4.1",
         messages=[{"role": "user", "content": "Use function call to calculate the sum of 114 and 514"}],
@@ -78,7 +78,7 @@ async def test_litellm_funcall_with_async_tool():
         return data.a + data.b
 
     fc = Funcall([async_add])
-    tools = fc.get_tools(target="litellm")
+    tools = fc.get_tools(target="completion")
     resp = await litellm.acompletion(
         model="gpt-4.1",
         messages=[{"role": "user", "content": "Use function call to calculate the sum of 114 and 514"}],

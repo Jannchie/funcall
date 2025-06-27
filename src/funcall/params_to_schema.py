@@ -119,14 +119,14 @@ def to_field_type(param: type) -> type:  # noqa: C901, PLR0911
     raise TypeError(msg)
 
 
-def params_to_schema(params: list[Any], target: Literal["openai", "litellm"] = "openai") -> dict[str, Any]:
+def params_to_schema(params: list[Any], target: Literal["response", "completion"] = "response") -> dict[str, Any]:
     """
     Read a parameter list, which can contain various types, dataclasses, pydantic models, basic types, even nested or nested in lists.
     Output a jsonschema describing this set of parameters.
 
     Args:
         params: List of parameter types
-        target: Target platform ("openai" or "litellm"), defaults to "openai"
+        target: Target api ("response" or "completion"), defaults to "response"
     """
     if not isinstance(params, list):
         msg = "params must be a list"
@@ -147,7 +147,7 @@ def params_to_schema(params: list[Any], target: Literal["openai", "litellm"] = "
     schema = model.model_json_schema(mode="serialization")
 
     # Apply normalization only for OpenAI target
-    if target == "openai":
+    if target == "response":
         _normalize_schema(schema)
 
     # Remove $defs section if we want no refs

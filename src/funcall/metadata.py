@@ -14,14 +14,14 @@ from .types import LiteLLMFunctionToolParam, is_context_type, is_optional_type
 
 def generate_function_metadata(
     func: Callable,
-    target: Literal["openai", "litellm"] = "openai",
+    target: Literal["response", "completion"] = "response",
 ) -> FunctionToolParam | LiteLLMFunctionToolParam:
     """
     Generate function metadata for OpenAI or LiteLLM function calling.
 
     Args:
         func: The function to generate metadata for
-        target: Target platform ("openai" or "litellm")
+        target: Target api ("response" or "completion")
 
     Returns:
         Function metadata in the appropriate format
@@ -35,7 +35,7 @@ def generate_function_metadata(
 
     if context_count > 1:
         logger.warning(
-            "Multiple Context-type parameters detected in function '%s'. Only one context instance will be injected at runtime.",
+            'Multiple Context-type parameters detected in function "%s". Only one context instance will be injected at runtime.',
             func.__name__,
         )
 
@@ -82,7 +82,7 @@ def _generate_single_param_metadata(
     param_type: type,
     schema: dict,
     description: str,
-    target: str,
+    target: Literal["response", "completion"],
 ) -> FunctionToolParam | LiteLLMFunctionToolParam | None:
     """Generate metadata for functions with a single dataclass/BaseModel parameter."""
     if not (isinstance(param_type, type) and (dataclasses.is_dataclass(param_type) or (BaseModel and issubclass(param_type, BaseModel)))):
@@ -99,7 +99,7 @@ def _generate_single_param_metadata(
         "additionalProperties": additional_properties,
     }
 
-    if target == "litellm":
+    if target == "completion":
         model_fields = None
         if BaseModel and issubclass(param_type, BaseModel):
             model_fields = param_type.model_fields
@@ -151,7 +151,7 @@ def _generate_multi_param_metadata(
     param_names: list[str],
     schema: dict,
     description: str,
-    target: str,
+    target: Literal["response", "completion"],
 ) -> FunctionToolParam | LiteLLMFunctionToolParam:
     """Generate metadata for functions with multiple parameters."""
     properties = {}
@@ -164,7 +164,7 @@ def _generate_multi_param_metadata(
         "additionalProperties": False,
     }
 
-    if target == "litellm":
+    if target == "completion":
         sig = inspect.signature(func)
         type_hints = get_type_hints(func)
         litellm_required = []

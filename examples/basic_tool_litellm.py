@@ -30,7 +30,7 @@ async def main():
             # },
             # {"role": "tool", "tool_call_id": "call_EzIVxomt3otdgnEHfQwrsdtc", "content": "629"},
         ],
-        tools=fc.get_tools(target="litellm"),  # Get the function metadata
+        tools=fc.get_tools(target="completion"),  # Get the function metadata
         stream=True,
     )
     print(resp)
@@ -45,6 +45,6 @@ if __name__ == "__main__":
     #     messages=[
     #         {"role": "user", "content": "What is the weather in New York?"},
     #     ],
-    #     tools=fc.get_tools(target="litellm"),  # Get the function metadata
+    #     tools=fc.get_tools(target="completion"),  # Get the function metadata
     # )
     # print(resp)

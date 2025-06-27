@@ -8,7 +8,7 @@ def add(a: str, b: str) -> str:
 
 def test_litellm_funcall_add():
     fc = Funcall([add])
-    tools_funcall = fc.get_tools(target="litellm")
+    tools_funcall = fc.get_tools(target="completion")
     assert tools_funcall == [
         {
             "type": "function",
@@ -45,7 +45,7 @@ def get_weather(city: str, date: str | None = None) -> str:
 
 def test_litellm_funcall_get_weather():
     fc = Funcall([get_weather])
-    tools_funcall = fc.get_tools(target="litellm")
+    tools_funcall = fc.get_tools(target="completion")
     assert tools_funcall == [
         {
             "type": "function",

@@ -80,12 +80,12 @@ class Funcall:
         self.functions = functions or []
         self.function_registry = {func.__name__: func for func in self.functions}
 
-    def get_tools(self, target: Literal["openai", "litellm"] = "openai") -> list[FunctionToolParam]:
+    def get_tools(self, target: Literal["response", "completion"] = "response") -> list[FunctionToolParam]:
         """
         Get tool definitions for the specified target platform.
 
         Args:
-            target: Target platform ("openai" or "litellm")
+            target: Target api ("response" or "completion")
 
         Returns:
             List of function tool parameters
