@@ -1,3 +1,15 @@
+## v0.8.0
+
+[v0.7.0...v0.8.0](https://github.com/Jannchie/funcall/compare/v0.7.0...v0.8.0)
+
+### :sparkles: Features
+
+- **examples**: add openai function call completion example - By [Jianqi Pan](mailto:jannchie@gmail.com) in [6778d4c](https://github.com/Jannchie/funcall/commit/6778d4c)
+
+### :art: Refactors
+
+- **litellm**: rename litellm target to completion - By [Jianqi Pan](mailto:jannchie@gmail.com) in [f01f0d2](https://github.com/Jannchie/funcall/commit/f01f0d2)
+
 ## v0.7.0
 
 [v0.6.0...v0.7.0](https://github.com/Jannchie/funcall/compare/v0.6.0...v0.7.0)
