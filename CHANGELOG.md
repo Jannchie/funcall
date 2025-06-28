@@ -1,3 +1,15 @@
+## v0.9.0
+
+[v0.8.0...v0.9.0](https://github.com/Jannchie/funcall/compare/v0.8.0...v0.9.0)
+
+### :sparkles: Features
+
+- **funcall**: add dynamic tool and function management apis - By [Jianqi Pan](mailto:jannchie@gmail.com) in [b92d4ba](https://github.com/Jannchie/funcall/commit/b92d4ba)
+
+### :wrench: Chores
+
+- update lock file - By [Jianqi Pan](mailto:jannchie@gmail.com) in [cd6fce6](https://github.com/Jannchie/funcall/commit/cd6fce6)
+
 ## v0.8.0
 
 [v0.7.0...v0.8.0](https://github.com/Jannchie/funcall/compare/v0.7.0...v0.8.0)
