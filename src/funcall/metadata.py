@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Literal, get_type_hints
 
 from openai.types.responses import FunctionToolParam as ResponseFunctionToolParam
+from openai.types.shared_params import FunctionDefinition
 from pydantic import BaseModel
 
 from funcall.params_to_schema import params_to_schema
@@ -120,17 +121,18 @@ def _generate_single_param_metadata(
                 is_optional = k not in required
             if not is_optional:
                 litellm_required.append(k)
-        return {
+        completion_tool: CompletionFunctionToolParam = {
             "type": "function",
-            "function": {
-                "name": func.__name__,
-                "description": description,
-                "parameters": {
+            "function": FunctionDefinition(
+                name=func.__name__,
+                description=description,
+                parameters={
                     **base_params,
                     "required": litellm_required,
                 },
-            },
-        }  # type: ignore
+            ),
+        }
+        return completion_tool
 
     # OpenAI format
     metadata: ResponseFunctionToolParam = {
@@ -174,17 +176,18 @@ def _generate_multi_param_metadata(
             is_optional = is_optional_type(hint) or (param.default != inspect.Parameter.empty)
             if not is_optional:
                 litellm_required.append(name)
-        return {
+        completion_tool: CompletionFunctionToolParam = {
             "type": "function",
-            "function": {
-                "name": func.__name__,
-                "description": description,
-                "parameters": {
+            "function": FunctionDefinition(
+                name=func.__name__,
+                description=description,
+                parameters={
                     **base_params,
                     "required": litellm_required,
                 },
-            },
-        }  # type: ignore
+            ),
+        }
+        return completion_tool
 
     # OpenAI format
     metadata: ResponseFunctionToolParam = {

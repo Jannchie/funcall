@@ -1,4 +1,6 @@
-from typing import Generic, Literal, Required, TypedDict, TypeVar, Union, get_args
+from typing import Generic, TypedDict, TypeVar, Union, get_args
+
+from openai.types.chat import ChatCompletionToolParam
 
 T = TypeVar("T")
 
@@ -10,21 +12,7 @@ class Context(Generic[T]):
         self.value = value
 
 
-class LiteLLMFunctionSpec(TypedDict):
-    """Type definition for LiteLLM function specification."""
-
-    name: Required[str]
-    parameters: Required[dict[str, object] | None]
-    strict: Required[bool | None]
-    type: Required[Literal["function"]]
-    description: str | None
-
-
-class CompletionFunctionToolParam(TypedDict):
-    """Type definition for LiteLLM function tool parameter."""
-
-    type: Literal["function"]
-    function: Required[LiteLLMFunctionSpec]
+CompletionFunctionToolParam = ChatCompletionToolParam
 
 
 class ToolMeta(TypedDict):

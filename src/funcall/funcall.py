@@ -4,15 +4,12 @@ import inspect
 import json
 from collections.abc import Callable
 from logging import getLogger
-from typing import Any, Literal, Union, get_type_hints
+from typing import Any, Literal, Union, get_type_hints, overload
 
 import litellm
-from openai.types.responses import (
-    FunctionToolParam as ResponseFunctionToolParam,
-)
-from openai.types.responses import (
-    ResponseFunctionToolCall,
-)
+from openai.types.responses import FunctionToolParam as ResponseFunctionToolParam
+from openai.types.responses import ResponseFunctionToolCall
+from openai.types.shared_params import FunctionDefinition
 from pydantic import BaseModel
 
 from funcall.decorators import ToolWrapper
@@ -143,7 +140,13 @@ class Funcall:
             if name in self.function_registry:
                 del self.function_registry[name]
 
-    def get_tools(self, target: Literal["response", "completion"] = "response") -> list[ResponseFunctionToolParam | CompletionFunctionToolParam]:
+    @overload
+    def get_tools(self, target: Literal["response"] = "response") -> list[ResponseFunctionToolParam]: ...
+
+    @overload
+    def get_tools(self, target: Literal["completion"]) -> list[CompletionFunctionToolParam]: ...
+
+    def get_tools(self, target: Literal["response", "completion"] = "response") -> list[ResponseFunctionToolParam] | list[CompletionFunctionToolParam]:
         """
         Get tool definitions for the specified target platform.
 
@@ -154,42 +157,43 @@ class Funcall:
             List of function tool parameters
         """
         # Add regular function tools
-        tools = [generate_function_metadata(func, target) for func in self.functions]  # type: ignore
-
-        # Add dynamic tools
-        for tool_info in self.dynamic_tools.values():
-            if target == "completion":
-                tools.append(
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": tool_info["name"],
-                            "description": tool_info["description"],
-                            "parameters": {
-                                "type": "object",
-                                "properties": tool_info["parameters"],
-                                "required": tool_info["required"],
-                            },
-                        },
-                    },  # type: ignore
-                )  # type: ignore
-            else:  # response format
-                tools.append(
-                    {
-                        "type": "function",
-                        "name": tool_info["name"],
-                        "description": tool_info["description"],
-                        "parameters": {
+        if target == "completion":
+            tools: list[CompletionFunctionToolParam] = [generate_function_metadata(func, target) for func in self.functions]  # type: ignore
+            # Add dynamic tools
+            for tool_info in self.dynamic_tools.values():
+                dynamic_tool: CompletionFunctionToolParam = {
+                    "type": "function",
+                    "function": FunctionDefinition(
+                        name=tool_info["name"],
+                        description=tool_info["description"],
+                        parameters={
                             "type": "object",
                             "properties": tool_info["parameters"],
                             "required": tool_info["required"],
-                            "additionalProperties": False,
                         },
-                        "strict": True,
-                    },
-                )  # type: ignore
+                    ),
+                }
+                tools.append(dynamic_tool)
+            return tools
 
-        return tools
+        # response format
+        tools_response: list[ResponseFunctionToolParam] = [generate_function_metadata(func, target) for func in self.functions]  # type: ignore
+        # Add dynamic tools
+        for tool_info in self.dynamic_tools.values():
+            dynamic_tool_response: ResponseFunctionToolParam = {
+                "type": "function",
+                "name": tool_info["name"],
+                "description": tool_info["description"],
+                "parameters": {
+                    "type": "object",
+                    "properties": tool_info["parameters"],
+                    "required": tool_info["required"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            }
+            tools_response.append(dynamic_tool_response)
+        return tools_response
 
     def _prepare_function_execution(
         self,
