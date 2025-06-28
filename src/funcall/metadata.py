@@ -4,18 +4,18 @@ from asyncio.log import logger
 from collections.abc import Callable
 from typing import Literal, get_type_hints
 
-from openai.types.responses import FunctionToolParam
+from openai.types.responses import FunctionToolParam as ResponseFunctionToolParam
 from pydantic import BaseModel
 
 from funcall.params_to_schema import params_to_schema
 
-from .types import LiteLLMFunctionToolParam, is_context_type, is_optional_type
+from .types import CompletionFunctionToolParam, is_context_type, is_optional_type
 
 
 def generate_function_metadata(
     func: Callable,
     target: Literal["response", "completion"] = "response",
-) -> FunctionToolParam | LiteLLMFunctionToolParam:
+) -> ResponseFunctionToolParam | CompletionFunctionToolParam:
     """
     Generate function metadata for OpenAI or LiteLLM function calling.
 
@@ -83,7 +83,7 @@ def _generate_single_param_metadata(
     schema: dict,
     description: str,
     target: Literal["response", "completion"],
-) -> FunctionToolParam | LiteLLMFunctionToolParam | None:
+) -> ResponseFunctionToolParam | CompletionFunctionToolParam | None:
     """Generate metadata for functions with a single dataclass/BaseModel parameter."""
     if not (isinstance(param_type, type) and (dataclasses.is_dataclass(param_type) or (BaseModel and issubclass(param_type, BaseModel)))):
         return None
@@ -133,7 +133,7 @@ def _generate_single_param_metadata(
         }  # type: ignore
 
     # OpenAI format
-    metadata: FunctionToolParam = {
+    metadata: ResponseFunctionToolParam = {
         "type": "function",
         "name": func.__name__,
         "description": description,
@@ -152,7 +152,7 @@ def _generate_multi_param_metadata(
     schema: dict,
     description: str,
     target: Literal["response", "completion"],
-) -> FunctionToolParam | LiteLLMFunctionToolParam:
+) -> ResponseFunctionToolParam | CompletionFunctionToolParam:
     """Generate metadata for functions with multiple parameters."""
     properties = {}
     for i, name in enumerate(param_names):
@@ -187,7 +187,7 @@ def _generate_multi_param_metadata(
         }  # type: ignore
 
     # OpenAI format
-    metadata: FunctionToolParam = {
+    metadata: ResponseFunctionToolParam = {
         "type": "function",
         "name": func.__name__,
         "description": description,

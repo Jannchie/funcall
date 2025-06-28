@@ -4,17 +4,19 @@ import inspect
 import json
 from collections.abc import Callable
 from logging import getLogger
-from typing import Literal, Union, get_type_hints
+from typing import Any, Literal, Union, get_type_hints
 
 import litellm
 from openai.types.responses import (
-    FunctionToolParam,
+    FunctionToolParam as ResponseFunctionToolParam,
+)
+from openai.types.responses import (
     ResponseFunctionToolCall,
 )
 from pydantic import BaseModel
 
 from funcall.decorators import ToolWrapper
-from funcall.types import ToolMeta, is_context_type
+from funcall.types import CompletionFunctionToolParam, ToolMeta, is_context_type
 
 from .metadata import generate_function_metadata
 
@@ -45,7 +47,7 @@ def _convert_argument_type(value: list, hint: type) -> object:
     elif isinstance(hint, type) and BaseModel and issubclass(hint, BaseModel):
         if isinstance(value, dict):
             fields = hint.model_fields
-            converted_data = {k: _convert_argument_type(v, fields[k].annotation) if k in fields else v for k, v in value.items()}  # type: ignore
+            converted_data = {k: _convert_argument_type(v, fields[k].annotation) if k in fields and fields[k].annotation is not None else v for k, v in value.items()}  # type: ignore
             result = hint(**converted_data)
         else:
             result = value
@@ -79,8 +81,69 @@ class Funcall:
         """
         self.functions = functions or []
         self.function_registry = {func.__name__: func for func in self.functions}
+        self.dynamic_tools: dict[str, dict[str, Any]] = {}
 
-    def get_tools(self, target: Literal["response", "completion"] = "response") -> list[FunctionToolParam]:
+    def add_dynamic_tool(
+        self,
+        name: str,
+        description: str,
+        parameters: dict[str, Any],
+        *,
+        required: list[str] | None = None,
+        handler: Callable[..., Any] | None = None,
+    ) -> None:
+        """
+        Add a dynamic tool by specifying its metadata directly.
+
+        Args:
+            name: Tool name
+            description: Tool description
+            parameters: Parameter schema (JSON Schema properties format)
+            required: List of required parameter names
+            handler: Optional function to handle the tool call
+        """
+
+        # Create a dynamic function that mimics a real function
+        def dynamic_func(**kwargs: object) -> object:
+            if handler:
+                return handler(**kwargs)
+            # Default behavior: return the call information
+            return {
+                "tool": name,
+                "arguments": kwargs,
+                "message": f"Tool '{name}' called with arguments: {kwargs}",
+            }
+
+        # Set function metadata for the dynamic function
+        dynamic_func.__name__ = name
+        dynamic_func.__doc__ = description
+
+        # Store the tool metadata
+        self.dynamic_tools[name] = {
+            "name": name,
+            "description": description,
+            "parameters": parameters,
+            "required": required or [],
+            "handler": handler,
+            "function": dynamic_func,
+        }
+
+        # Add to function registry
+        self.function_registry[name] = dynamic_func
+
+    def remove_dynamic_tool(self, name: str) -> None:
+        """
+        Remove a dynamic tool by name.
+
+        Args:
+            name: Name of the tool to remove
+        """
+        if name in self.dynamic_tools:
+            del self.dynamic_tools[name]
+            if name in self.function_registry:
+                del self.function_registry[name]
+
+    def get_tools(self, target: Literal["response", "completion"] = "response") -> list[ResponseFunctionToolParam | CompletionFunctionToolParam]:
         """
         Get tool definitions for the specified target platform.
 
@@ -90,7 +153,43 @@ class Funcall:
         Returns:
             List of function tool parameters
         """
-        return [generate_function_metadata(func, target) for func in self.functions]  # type: ignore
+        # Add regular function tools
+        tools = [generate_function_metadata(func, target) for func in self.functions]  # type: ignore
+
+        # Add dynamic tools
+        for tool_info in self.dynamic_tools.values():
+            if target == "completion":
+                tools.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tool_info["name"],
+                            "description": tool_info["description"],
+                            "parameters": {
+                                "type": "object",
+                                "properties": tool_info["parameters"],
+                                "required": tool_info["required"],
+                            },
+                        },
+                    },  # type: ignore
+                )  # type: ignore
+            else:  # response format
+                tools.append(
+                    {
+                        "type": "function",
+                        "name": tool_info["name"],
+                        "description": tool_info["description"],
+                        "parameters": {
+                            "type": "object",
+                            "properties": tool_info["parameters"],
+                            "required": tool_info["required"],
+                            "additionalProperties": False,
+                        },
+                        "strict": True,
+                    },
+                )  # type: ignore
+
+        return tools
 
     def _prepare_function_execution(
         self,
@@ -114,9 +213,17 @@ class Funcall:
             raise ValueError(msg)
 
         func = self.function_registry[func_name]
+        arguments = json.loads(args)
+
+        # Check if this is a dynamic tool
+        if func_name in self.dynamic_tools:
+            # For dynamic tools, we pass arguments as-is since they don't have type hints
+            prepared_kwargs = arguments if isinstance(arguments, dict) else {"value": arguments}
+            return func, prepared_kwargs
+
+        # Handle regular functions
         signature = inspect.signature(func)
         type_hints = get_type_hints(func)
-        arguments = json.loads(args)
 
         # Find non-context parameters
         non_context_params = [name for name in signature.parameters if not is_context_type(type_hints.get(name, str))]
@@ -132,7 +239,7 @@ class Funcall:
 
             if is_context_type(hint):
                 prepared_kwargs[param_name] = context
-            elif param_name in arguments:
+            elif param_name in arguments:  # type: ignore
                 prepared_kwargs[param_name] = _convert_argument_type(arguments[param_name], hint)  # type: ignore
 
         return func, prepared_kwargs
@@ -395,7 +502,125 @@ class Funcall:
                 require_confirm=func.require_confirm,
                 return_direct=func.return_direct,
             )
+        # For dynamic tools, always return default metadata
         return ToolMeta(
             require_confirm=False,
             return_direct=False,
         )
+
+    def add_function(self, func: Callable) -> None:
+        """
+        Add a function as a tool after initialization.
+
+        Args:
+            func: The function to add as a tool
+
+        Raises:
+            ValueError: If a function with the same name already exists
+        """
+        func_name = func.__name__
+        if func_name in self.function_registry:
+            msg = f"Function '{func_name}' already exists"
+            raise ValueError(msg)
+
+        self.functions.append(func)
+        self.function_registry[func_name] = func
+
+    def remove_function(self, name: str) -> None:
+        """
+        Remove a function tool by name.
+
+        Args:
+            name: Name of the function to remove
+
+        Raises:
+            ValueError: If the function is not found or is a dynamic tool
+        """
+        if name not in self.function_registry:
+            msg = f"Function '{name}' not found"
+            raise ValueError(msg)
+
+        # Check if it's a dynamic tool (should use remove_dynamic_tool instead)
+        if name in self.dynamic_tools:
+            msg = f"'{name}' is a dynamic tool. Use remove_dynamic_tool() instead"
+            raise ValueError(msg)
+
+        # Find and remove from functions list
+        func_to_remove = self.function_registry[name]
+        self.functions = [f for f in self.functions if f is not func_to_remove]
+
+        # Remove from registry
+        del self.function_registry[name]
+
+    def remove_function_by_callable(self, func: Callable) -> None:
+        """
+        Remove a function tool by its callable reference.
+
+        Args:
+            func: The function to remove
+
+        Raises:
+            ValueError: If the function is not found
+        """
+        func_name = func.__name__
+
+        # Check if the function is registered and is the same object
+        if func_name not in self.function_registry:
+            msg = f"Function '{func_name}' not found"
+            raise ValueError(msg)
+
+        if self.function_registry[func_name] is not func:
+            msg = f"Function '{func_name}' found but is not the same object"
+            raise ValueError(msg)
+
+        # Check if it's a dynamic tool
+        if func_name in self.dynamic_tools:
+            msg = f"'{func_name}' is a dynamic tool. Use remove_dynamic_tool() instead"
+            raise ValueError(msg)
+
+        # Remove from functions list
+        self.functions = [f for f in self.functions if f is not func]
+
+        # Remove from registry
+        del self.function_registry[func_name]
+
+    def has_function(self, name: str) -> bool:
+        """
+        Check if a function tool exists by name.
+
+        Args:
+            name: Name of the function to check
+
+        Returns:
+            True if the function exists, False otherwise
+        """
+        return name in self.function_registry
+
+    def list_functions(self) -> list[str]:
+        """
+        Get a list of all registered function names.
+
+        Returns:
+            List of function names (both regular functions and dynamic tools)
+        """
+        return list(self.function_registry.keys())
+
+    def list_regular_functions(self) -> list[str]:
+        """
+        Get a list of regular function names (excluding dynamic tools).
+
+        Returns:
+            List of regular function names
+        """
+        return [func.__name__ for func in self.functions]
+
+    def list_dynamic_tools(self) -> list[str]:
+        """
+        Get a list of dynamic tool names.
+
+        Returns:
+            List of dynamic tool names
+        """
+        return list(self.dynamic_tools.keys())
+
+    # ...existing code...

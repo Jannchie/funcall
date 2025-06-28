@@ -20,6 +20,7 @@ This process is repetitive and error-prone. Funcall automates schema generation 
 - Automatically generate schemas from your function signatures and Pydantic models
 - Integrate easily with OpenAI's function calling API
 - No more manual, repetitive schema definitions—just define your function once
+- **Dynamic tool registration** - Add tools without defining actual functions
 - Easy to extend and use in your own projects
 
 ## Installation
@@ -87,6 +88,120 @@ Funcall can read the type hints and docstrings to generate the schema automatica
     }
 ]
 ```
+
+## Dynamic Tools
+
+Funcall now supports dynamic tool registration, allowing you to add tools without defining actual functions. This provides more flexibility in tool management.
+
+### Adding Dynamic Tools
+
+Use the `add_dynamic_tool` method to register tools directly through metadata:
+
+```python
+from funcall import Funcall
+
+funcall = Funcall()
+
+# Add a basic tool
+funcall.add_dynamic_tool(
+    name="calculator",
+    description="Perform basic mathematical operations",
+    parameters={
+        "operation": {
+            "type": "string",
+            "description": "The operation to perform",
+            "enum": ["add", "subtract", "multiply", "divide"]
+        },
+        "a": {
+            "type": "number", 
+            "description": "The first number"
+        },
+        "b": {
+            "type": "number",
+            "description": "The second number"
+        }
+    },
+    required=["operation", "a", "b"],
+    handler=lambda operation, a, b: {
+        "add": a + b,
+        "subtract": a - b, 
+        "multiply": a * b,
+        "divide": a / b if b != 0 else "Cannot divide by zero"
+    }[operation]
+)
+```
+
+### Parameters
+
+- `name`: Tool name
+- `description`: Tool description  
+- `parameters`: Parameter definitions (JSON Schema format)
+- `required`: List of required parameter names (optional)
+- `handler`: Custom handler function (optional)
+
+### Handler Options
+
+#### With Custom Handler
+
+```python
+def custom_handler(city: str, units: str = "celsius") -> dict:
+    return {"city": city, "temperature": "25°C", "units": units}
+
+funcall.add_dynamic_tool(
+    name="get_weather",
+    description="Get weather information",
+    parameters={
+        "city": {"type": "string", "description": "City name"},
+        "units": {"type": "string", "description": "Temperature units", "default": "celsius"}
+    },
+    required=["city"],
+    handler=custom_handler
+)
+```
+
+#### Without Handler (Default Behavior)
+
+If no handler is provided, the tool returns call information:
+
+```python
+funcall.add_dynamic_tool(
+    name="simple_tool",
+    description="A simple tool",
+    parameters={
+        "input": {"type": "string", "description": "Input parameter"}
+    },
+    required=["input"]
+)
+
+# When called, returns:
+# {
+#     "tool": "simple_tool",
+#     "arguments": {"input": "value"},
+#     "message": "Tool 'simple_tool' called with arguments: {'input': 'value'}"
+# }
+```
+
+### Removing Dynamic Tools
+
+```python
+funcall.remove_dynamic_tool("tool_name")
+```
+
+### Integration with Existing Features
+
+Dynamic tools are fully integrated with existing functionality:
+
+- `get_tools()` - Includes dynamic tool definitions
+- `call_function()` / `call_function_async()` - Call dynamic tools
+- `handle_function_call()` - Handle LLM tool calls
+- `get_tool_meta()` - Get tool metadata
+
+### Use Cases
+
+1. **Rapid Prototyping** - Test tools without defining functions
+2. **Configuration-Driven Tools** - Create tools dynamically from config files
+3. **API Proxy Tools** - Create tools that call external APIs
+4. **Mocking and Testing** - Create mock tools for testing
 
 See the `examples/` directory for more usage examples.
 

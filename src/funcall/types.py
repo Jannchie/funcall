@@ -20,7 +20,7 @@ class LiteLLMFunctionSpec(TypedDict):
     description: str | None
 
 
-class LiteLLMFunctionToolParam(TypedDict):
+class CompletionFunctionToolParam(TypedDict):
     """Type definition for LiteLLM function tool parameter."""
 
     type: Literal["function"]
