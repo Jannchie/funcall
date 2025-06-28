@@ -1,3 +1,15 @@
+## v0.9.1
+
+[v0.9.0...v0.9.1](https://github.com/Jannchie/funcall/compare/v0.9.0...v0.9.1)
+
+### :art: Refactors
+
+- **funcall**: update completion tool param typing and usage - By [Jianqi Pan](mailto:jannchie@gmail.com) in [5d8b5a2](https://github.com/Jannchie/funcall/commit/5d8b5a2)
+
+### :wrench: Chores
+
+- **deps**: update lock file - By [Jianqi Pan](mailto:jannchie@gmail.com) in [315567d](https://github.com/Jannchie/funcall/commit/315567d)
+
 ## v0.9.0
 
 [v0.8.0...v0.9.0](https://github.com/Jannchie/funcall/compare/v0.8.0...v0.9.0)
