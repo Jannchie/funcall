@@ -298,3 +298,41 @@ def test_handle_function_call_array_of_pydantic():
     # 检查 schema 结构
     props = meta["parameters"]["properties"]
     assert props["items"]["type"] == "array"
+
+
+def test_handle_function_call_wraps_non_context():
+    @dataclasses.dataclass
+    class MyData:
+        a: int
+
+    @dataclasses.dataclass
+    class MyCtx:
+        user: str
+
+    def foo(data: MyData, ctx: Context) -> str:
+        # ctx.value 可能是 dataclass、dict、str
+        if isinstance(ctx.value, dict):
+            user = ctx.value["user"]
+        elif hasattr(ctx.value, "user"):
+            user = ctx.value.user
+        else:
+            user = ctx.value
+        return f"{data.a}-{user}"
+
+    fc = Funcall([foo])
+    item = get_dummy_response_function_tool_call("foo", json.dumps({"a": 123}))
+
+    # context 传入原始 dataclass
+    ctx_obj = MyCtx(user="bob")
+    result = fc.handle_function_call(item, context=ctx_obj)
+    assert result == "123-bob"
+
+    # context 传入 dict
+    ctx_dict = {"user": "alice"}
+    result = fc.handle_function_call(item, context=ctx_dict)
+    assert result == "123-alice"
+
+    # context 传入字符串（不推荐，但应能包裹）
+    ctx_str = "charlie"
+    result = fc.handle_function_call(item, context=ctx_str)
+    assert result == "123-charlie"

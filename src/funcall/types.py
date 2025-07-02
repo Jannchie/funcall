@@ -8,7 +8,7 @@ T = TypeVar("T")
 class Context(Generic[T]):
     """Generic context container for dependency injection in function calls."""
 
-    def __init__(self, value: T | None = None) -> None:
+    def __init__(self, value: T) -> None:
         self.value = value
 
 

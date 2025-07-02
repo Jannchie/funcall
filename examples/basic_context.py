@@ -8,11 +8,11 @@ from funcall import Context, Funcall
 
 @dataclass
 class ContextState:
-    user_id: 47
+    user_id: str
 
 
 # Define the function to be called
-def get_user_id(ctx: Context[ContextState]) -> float:
+def get_user_id(ctx: Context[ContextState]) -> str:
     """Check if the user ID in the context matches a specific value"""
     return ctx.value.user_id
 
@@ -26,7 +26,7 @@ resp = openai.responses.create(
     tools=fc.get_tools(),
 )
 
-ctx = Context(ContextState(user_id="12345"))
+ctx = ContextState(user_id="12345")
 
 for o in resp.output:
     if isinstance(o, ResponseFunctionToolCall):

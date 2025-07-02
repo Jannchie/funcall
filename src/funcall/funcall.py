@@ -13,7 +13,7 @@ from openai.types.shared_params import FunctionDefinition
 from pydantic import BaseModel
 
 from funcall.decorators import ToolWrapper
-from funcall.types import CompletionFunctionToolParam, ToolMeta, is_context_type
+from funcall.types import CompletionFunctionToolParam, Context, ToolMeta, is_context_type
 
 from .metadata import generate_function_metadata
 
@@ -457,6 +457,11 @@ class Funcall:
         Returns:
             Function execution result
         """
+
+        # if context is not Context, wrap it
+        if context is not None and not is_context_type(type(context)):
+            context = Context(context)
+
         if isinstance(call, ResponseFunctionToolCall):
             return self.handle_openai_function_call(call, context)
         if isinstance(call, litellm.ChatCompletionMessageToolCall):
