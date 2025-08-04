@@ -9,7 +9,6 @@ dependencies = [
     "litellm>=1.72.6.post1",
     "openai>=1.79.0",
     "pydantic>=2.11.4",
-    "pytest-asyncio>=1.0.0",
     "rich>=14.0.0",
     "typing-inspect>=0.9.0",
 ]
@@ -64,7 +63,12 @@ upgrade = true
 package = true
 
 [dependency-groups]
-dev = ["pytest>=8.3.5", "pytest-cov>=6.1.1", "ruff>=0.11.10"]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=1.1.0",
+    "pytest-cov>=6.1.1",
+    "ruff>=0.11.10",
+]
 
 [tool.coverage.run]
 omit = ["tests/*"]
