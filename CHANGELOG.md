@@ -1,3 +1,20 @@
+## v0.10.0
+
+[v0.9.1...v0.10.0](https://github.com/Jannchie/funcall/compare/v0.9.1...v0.10.0)
+
+### :sparkles: Features
+
+- **context**: auto-wrap context if not Context - By [Jianqi Pan](mailto:jannchie@gmail.com) in [86cb43a](https://github.com/Jannchie/funcall/commit/86cb43a)
+
+### :memo: Documentation
+
+- **dynamic-tools**: remove dynamic tools usage guide - By [Jianqi Pan](mailto:jannchie@gmail.com) in [d31ebbf](https://github.com/Jannchie/funcall/commit/d31ebbf)
+
+### :wrench: Chores
+
+- **dependencies**: move pytest-asyncio to dev group - By [Jianqi Pan](mailto:jannchie@gmail.com) in [dc2a1de](https://github.com/Jannchie/funcall/commit/dc2a1de)
+- **deps**: update lock file - By [Jianqi Pan](mailto:jannchie@gmail.com) in [18fe787](https://github.com/Jannchie/funcall/commit/18fe787)
+
 ## v0.9.1
 
 [v0.9.0...v0.9.1](https://github.com/Jannchie/funcall/compare/v0.9.0...v0.9.1)
