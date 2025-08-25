@@ -1,3 +1,15 @@
+## v0.11.0
+
+[v0.10.0...v0.11.0](https://github.com/Jannchie/funcall/compare/v0.10.0...v0.11.0)
+
+### :sparkles: Features
+
+- **events**: add event system and emitter support to funcall - By [Jianqi Pan](mailto:jannchie@gmail.com) in [5723aa8](https://github.com/Jannchie/funcall/commit/5723aa8)
+
+### :wrench: Chores
+
+- **dependencies**: update lock file - By [Jianqi Pan](mailto:jannchie@gmail.com) in [fb3d983](https://github.com/Jannchie/funcall/commit/fb3d983)
+
 ## v0.10.0
 
 [v0.9.1...v0.10.0](https://github.com/Jannchie/funcall/compare/v0.9.1...v0.10.0)

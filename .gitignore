@@ -10,3 +10,6 @@ wheels/
 .venv
 coverage.xml
 .coverage
+
+CLAUDE.md
+*.local.*
