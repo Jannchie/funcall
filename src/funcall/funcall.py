@@ -13,6 +13,7 @@ from openai.types.shared_params import FunctionDefinition
 from pydantic import BaseModel
 
 from funcall.decorators import ToolWrapper
+from funcall.events import create_emitter
 from funcall.types import CompletionFunctionToolParam, Context, ToolMeta, is_context_type
 
 from .metadata import generate_function_metadata
@@ -79,6 +80,7 @@ class Funcall:
         self.functions = functions or []
         self.function_registry = {func.__name__: func for func in self.functions}
         self.dynamic_tools: dict[str, dict[str, Any]] = {}
+        self._event_callbacks: list[Callable[[Any], None]] = []
 
     def add_dynamic_tool(
         self,
@@ -223,26 +225,46 @@ class Funcall:
         if func_name in self.dynamic_tools:
             # For dynamic tools, we pass arguments as-is since they don't have type hints
             prepared_kwargs = arguments if isinstance(arguments, dict) else {"value": arguments}
+
+            # Check if the handler accepts emit parameter
+            tool_info = self.dynamic_tools[func_name]
+            handler = tool_info.get("handler")
+            if handler and "emit" in inspect.signature(handler).parameters:
+                prepared_kwargs["emit"] = self._create_emit_function()
+
             return func, prepared_kwargs
 
         # Handle regular functions
         signature = inspect.signature(func)
         type_hints = get_type_hints(func)
 
-        # Find non-context parameters
-        non_context_params = [name for name in signature.parameters if not is_context_type(type_hints.get(name, str))]
+        # Find parameters that are not Context or emit function
+        emit_param_name = None
+        non_context_non_emit_params = []
 
-        # Handle single parameter case
-        if len(non_context_params) == 1 and (not isinstance(arguments, dict) or set(arguments.keys()) != set(non_context_params)):
-            arguments = {non_context_params[0]: arguments}
+        for param_name in signature.parameters:
+            hint = type_hints.get(param_name, str)
+            if is_context_type(hint):
+                continue
+            if param_name == "emit" or (hasattr(hint, "__origin__") and str(hint).startswith("typing.Callable")):
+                emit_param_name = param_name
+            else:
+                non_context_non_emit_params.append(param_name)
 
-        # Prepare final kwargs with type conversion and context injection
+        # Handle single parameter case (excluding context and emit)
+        if len(non_context_non_emit_params) == 1 and (not isinstance(arguments, dict) or set(arguments.keys()) != set(non_context_non_emit_params)):
+            arguments = {non_context_non_emit_params[0]: arguments}
+
+        # Prepare final kwargs with type conversion, context injection, and emit injection
         prepared_kwargs = {}
         for param_name in signature.parameters:
             hint = type_hints.get(param_name, str)
 
             if is_context_type(hint):
                 prepared_kwargs[param_name] = context
+            elif param_name == emit_param_name:
+                # Inject emit function
+                prepared_kwargs[param_name] = self._create_emit_function()
             elif param_name in arguments:  # type: ignore
                 prepared_kwargs[param_name] = _convert_argument_type(arguments[param_name], hint)  # type: ignore
 
@@ -284,6 +306,10 @@ class Funcall:
             ValueError: If function is not found
             json.JSONDecodeError: If arguments are not valid JSON
         """
+        # if context is not Context, wrap it
+        if context is not None and not is_context_type(type(context)):
+            context = Context(context)
+
         func, kwargs = self._prepare_function_execution(name, arguments, context)
 
         if isinstance(func, ToolWrapper):
@@ -325,6 +351,10 @@ class Funcall:
             ValueError: If function is not found
             json.JSONDecodeError: If arguments are not valid JSON
         """
+        # if context is not Context, wrap it
+        if context is not None and not is_context_type(type(context)):
+            context = Context(context)
+
         func, kwargs = self._prepare_function_execution(name, arguments, context)
         if isinstance(func, ToolWrapper):
             if func.is_async:
@@ -631,5 +661,23 @@ class Funcall:
             List of dynamic tool names
         """
         return list(self.dynamic_tools.keys())
+
+    def on_event(self, callback: Callable[[Any], None]) -> None:
+        """
+        Register an event callback function.
+
+        Args:
+            callback: Function to call when events are emitted
+        """
+        self._event_callbacks.append(callback)
+
+    def _create_emit_function(self) -> Callable[[Any], None]:
+        """
+        Create an emit function for event broadcasting.
+
+        Returns:
+            Emit function that broadcasts events to all registered callbacks
+        """
+        return create_emitter(self._event_callbacks)
 
     # ...existing code...

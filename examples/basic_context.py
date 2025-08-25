@@ -21,7 +21,7 @@ def get_user_id(ctx: Context[ContextState]) -> str:
 fc = Funcall([get_user_id])
 
 resp = openai.responses.create(
-    model="gpt-4.1",
+    model="gpt-4.1-nano",
     input="Use function call to check if the user ID in the context.",
     tools=fc.get_tools(),
 )
